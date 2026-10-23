@@ -143,12 +143,17 @@ struct WelcomeView: View {
 
     /// `Tabula --connect "<name>" [--connect "<other>"]` opens saved connections straight away.
     private func openConnectionFromLaunchArguments() {
+        // onAppear fires again whenever the welcome window comes back: act only once per launch.
+        guard !Self.launchArgumentsHandled else { return }
+        Self.launchArgumentsHandled = true
         let arguments = CommandLine.arguments
         let names = arguments.indices.dropLast().filter { arguments[$0] == "--connect" }.map { arguments[$0 + 1] }
         for name in names {
             model.connections.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }.map(open)
         }
     }
+
+    @MainActor private static var launchArgumentsHandled = false
 
     private func perform(_ action: () throws -> Void) {
         do { try action() } catch { errorMessage = error.localizedDescription }
