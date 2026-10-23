@@ -41,6 +41,11 @@ public struct TableStructure: Equatable, Sendable {
     public let columns: [ColumnInfo]
     public let indexes: [IndexInfo]
 
+    public init(columns: [ColumnInfo], indexes: [IndexInfo]) {
+        self.columns = columns
+        self.indexes = indexes
+    }
+
     public var primaryKey: [String] { columns.filter(\.isPrimaryKey).map(\.name) }
 }
 
