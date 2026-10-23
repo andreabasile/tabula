@@ -11,7 +11,7 @@ prima del limite di 60 minuti di DSQL o quando il server la chiude.
 brew install --cask andreabasile/tap/tabula
 ```
 
-Solo Apple Silicon, macOS 15+. L'app è firmata ma non notarizzata: il cask le toglie la quarantena
+Solo Apple Silicon, macOS 15+. L'app ha una firma ad-hoc e non è notarizzata: il cask le toglie la quarantena
 dopo l'installazione, altrimenti Gatekeeper ne bloccherebbe l'apertura.
 
 ## Sviluppo
@@ -28,7 +28,7 @@ swift test                       # test del nucleo
 swift run Tabula                 # avvio in sviluppo
 ./scripts/build-app.sh           # build/Tabula.app firmata
 ./scripts/build-app.sh --install # copia in /Applications e apre
-./scripts/release.sh 1.0.1       # release su GitHub e aggiornamento del cask nel tap
+./scripts/release.sh 1.0.1       # tag v1.0.1: la GitHub Action pubblica il DMG e aggiorna il cask
 ```
 
 Avvio diretto su connessioni salvate: `Tabula --connect "<nome>" [--connect "<altra>"] [--table <tabella>]`.
