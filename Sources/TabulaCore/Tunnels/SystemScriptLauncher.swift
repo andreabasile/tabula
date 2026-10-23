@@ -64,8 +64,9 @@ final class ShellProcess: RunningScript, @unchecked Sendable {
         posix_spawn_file_actions_adddup2(&actions, writeFD, 2)
         posix_spawn_file_actions_addclose(&actions, readFD)
 
-        let arguments = ["/bin/zsh", "-l", "-c", script].map { strdup($0) } + [nil]
-        let environment = Self.environment().map { strdup("\($0.key)=\($0.value)") } + [nil]
+        // Explicit types: older compilers cannot infer the optional element on their own.
+        let arguments: [UnsafeMutablePointer<CChar>?] = ["/bin/zsh", "-l", "-c", script].map { strdup($0) } + [nil]
+        let environment: [UnsafeMutablePointer<CChar>?] = Self.environment().map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer {
             arguments.forEach { free($0) }
             environment.forEach { free($0) }

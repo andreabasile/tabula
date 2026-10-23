@@ -5,8 +5,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# TABULA_SIGN_IDENTITY="-" firma ad-hoc, come fa la GitHub Action senza certificato.
-IDENTITY="${TABULA_SIGN_IDENTITY:-Apple Development: NOME (TEAMID)}"
+# Firma con il primo certificato "Apple Development" del Portachiavi, stabile fra le build;
+# senza certificato (o con TABULA_SIGN_IDENTITY="-", come nella GitHub Action) firma ad-hoc.
+DEFAULT_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development: .*\)"/\1/p' | head -1)
+IDENTITY="${TABULA_SIGN_IDENTITY:-${DEFAULT_IDENTITY:--}}"
 swift build -c release --product Tabula
 BIN="$(swift build -c release --show-bin-path)/Tabula"
 APP=build/Tabula.app
