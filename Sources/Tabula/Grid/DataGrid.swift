@@ -27,14 +27,13 @@ struct DataGrid: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let tableView = GridTableView()
         tableView.style = .plain
-        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.usesAlternatingRowBackgroundColors = true
         tableView.allowsMultipleSelection = true
         tableView.allowsColumnReordering = true
         tableView.allowsColumnResizing = true
         tableView.columnAutoresizingStyle = .noColumnAutoresizing
-        tableView.gridStyleMask = [.solidVerticalGridLineMask, .solidHorizontalGridLineMask]
-        // TablePlus's grid: compact rows and hairlines that barely show.
-        tableView.gridColor = NSColor.separatorColor.withAlphaComponent(0.12)
+        // Compact zebra rows with no grid lines.
+        tableView.gridStyleMask = []
         tableView.intercellSpacing = NSSize(width: 0, height: 0)
         tableView.rowHeight = 20
         tableView.dataSource = context.coordinator
