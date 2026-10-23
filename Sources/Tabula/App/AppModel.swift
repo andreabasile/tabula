@@ -13,11 +13,18 @@ final class AppModel {
     let store: ConnectionStore
     let sessionFactory: SessionFactory
 
+    /// Created once, before any session: closes tunnels a crashed run left open.
+    private static let tunnelRegistry: TunnelRegistry = {
+        let registry = TunnelRegistry(fileURL: TunnelRegistry.defaultFileURL())
+        registry.reapOrphans()
+        return registry
+    }()
+
     init(store: ConnectionStore = ConnectionStore(fileURL: ConnectionStore.defaultFileURL(), secrets: KeychainSecretStore())) {
         self.store = store
         self.sessionFactory = SessionFactory(
             tokens: CachedTokenProvider(generator: AWSCLITokenGenerator()),
-            tunnels: TunnelManager(launcher: SystemScriptLauncher(), probe: TCPPortProbe())
+            tunnels: TunnelManager(launcher: SystemScriptLauncher(registry: Self.tunnelRegistry), probe: TCPPortProbe())
         )
         reload()
         importFromLaunchEnvironment()

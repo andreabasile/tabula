@@ -25,7 +25,9 @@ codesign --verify --strict --deep "$APP"
 echo "ok: $APP"
 
 if [[ "${1:-}" == "--install" ]]; then
+    # SIGTERM makes Tabula quit normally, closing the tunnels it opened; wait for it.
     pkill -x Tabula || true
+    for _ in $(seq 1 40); do pgrep -x Tabula >/dev/null || break; sleep 0.25; done
     rm -rf /Applications/Tabula.app
     cp -R "$APP" /Applications/
     open /Applications/Tabula.app

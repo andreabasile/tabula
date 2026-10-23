@@ -183,3 +183,62 @@ struct TunnelIntegrationTests {
         #expect(await TCPPortProbe().isOpen(host: "127.0.0.1", port: port) == false)
     }
 }
+
+struct TunnelProcessGroupTests {
+    /// The bug seen live: zsh exits, its children are re-parented to launchd and keep the
+    /// tunnel open. Signalling the process group must still reach them.
+    @Test func releaseKillsChildrenEvenAfterTheShellExited() async throws {
+        let port = Int.random(in: 50000...59000)
+        let manager = TunnelManager(launcher: SystemScriptLauncher(), probe: TCPPortProbe())
+        let listener = "import socket,time; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(('127.0.0.1', \(port))); s.listen(50); time.sleep(60)"
+        let script = PreConnectScript(script: "python3 -c \"\(listener)\" & sleep 0.3; exit 0", waitsForPort: true, timeoutSeconds: 10)
+        let owner = UUID()
+        try await manager.prepare(script, host: "127.0.0.1", port: port, owner: owner)
+        #expect(await TCPPortProbe().isOpen(host: "127.0.0.1", port: port))
+        try await Task.sleep(for: .milliseconds(400))
+        await manager.release(owner: owner)
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(await TCPPortProbe().isOpen(host: "127.0.0.1", port: port) == false)
+    }
+}
+
+struct TunnelRegistryTests {
+    func makeRegistry(alive: [Int32: [String]], killed: KillLog) -> TunnelRegistry {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tabula-\(UUID().uuidString)/tunnels.json")
+        return TunnelRegistry(fileURL: url, system: .init(
+            groupCommands: { alive[$0] ?? [] },
+            killGroup: { killed.append($0) }
+        ))
+    }
+
+    @Test func reapsOnlyGroupsStillRunningOurScript() {
+        let killed = KillLog()
+        let registry = makeRegistry(alive: [
+            100: ["bash ~/scripts/db-tunnel.sh test", "session-manager-plugin …"],
+            200: ["/usr/bin/some-other-program"],
+        ], killed: killed)
+        registry.record(processGroup: 100, script: "bash ~/scripts/db-tunnel.sh test")
+        registry.record(processGroup: 200, script: "bash ~/scripts/db-tunnel.sh prod")
+        registry.record(processGroup: 300, script: "bash gone.sh")
+        let reaped = registry.reapOrphans()
+        #expect(killed.groups == [100])
+        #expect(reaped.map(\.processGroup) == [100])
+        #expect(registry.reapOrphans().isEmpty)
+    }
+
+    @Test func forgottenGroupsAreNotReaped() {
+        let killed = KillLog()
+        let registry = makeRegistry(alive: [100: ["bash tunnel.sh"]], killed: killed)
+        registry.record(processGroup: 100, script: "bash tunnel.sh")
+        registry.forget(processGroup: 100)
+        registry.reapOrphans()
+        #expect(killed.groups.isEmpty)
+    }
+}
+
+final class KillLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var killed: [Int32] = []
+    func append(_ group: Int32) { lock.withLock { killed.append(group) } }
+    var groups: [Int32] { lock.withLock { killed } }
+}

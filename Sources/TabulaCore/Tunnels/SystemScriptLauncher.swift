@@ -2,49 +2,115 @@ import Darwin
 import Foundation
 
 /// Runs scripts in a login zsh, so `aws`, `ssh` and the user's PATH work as in Terminal.
+/// Each script leads its own process group, so the whole tree (zsh → bash → aws →
+/// session-manager-plugin) can be stopped with one signal, even after zsh has exited.
 public struct SystemScriptLauncher: ScriptLaunching {
-    public init() {}
+    private let registry: TunnelRegistry?
+
+    public init(registry: TunnelRegistry? = nil) {
+        self.registry = registry
+    }
 
     public func launch(_ script: String) throws -> RunningScript {
-        try ShellProcess(script: script)
+        let process = try ShellProcess(script: script)
+        registry?.record(processGroup: process.processGroup, script: script)
+        process.onFinish = { [registry] group in registry?.forget(processGroup: group) }
+        return process
+    }
+}
+
+public enum ShellProcessError: Error, LocalizedError {
+    case spawnFailed(Int32)
+
+    public var errorDescription: String? {
+        switch self {
+        case .spawnFailed(let code): "Impossibile avviare lo script: \(String(cString: strerror(code)))"
+        }
     }
 }
 
 final class ShellProcess: RunningScript, @unchecked Sendable {
-    private let process = Process()
+    let processGroup: pid_t
+    var onFinish: ((pid_t) -> Void)?
     private let lock = NSLock()
     private var buffer = ""
+    private var status: Int32?
+    private let reader: FileHandle
 
     init(script: String) throws {
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-l", "-c", script]
-        var environment = ProcessInfo.processInfo.environment
-        environment["PATH"] = ([environment["PATH"]].compactMap { $0 } + ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]).joined(separator: ":")
-        environment["AWS_PAGER"] = ""
-        process.environment = environment
-        process.standardInput = FileHandle.nullDevice
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let chunk = String(decoding: handle.availableData, as: UTF8.self)
-            self?.append(chunk)
+        var pipeFDs: [Int32] = [0, 0]
+        guard pipe(&pipeFDs) == 0 else { throw ShellProcessError.spawnFailed(errno) }
+        let (readFD, writeFD) = (pipeFDs[0], pipeFDs[1])
+
+        var attributes: posix_spawnattr_t?
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+        // Ignored signals survive exec: without resetting them, a script started by an app
+        // that ignores SIGTERM (Tabula does, to quit cleanly) could never be stopped.
+        var allSignals = sigset_t()
+        sigfillset(&allSignals)
+        var noSignals = sigset_t()
+        sigemptyset(&noSignals)
+        posix_spawnattr_setsigdefault(&attributes, &allSignals)
+        posix_spawnattr_setsigmask(&attributes, &noSignals)
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
+        posix_spawnattr_setpgroup(&attributes, 0)
+
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        posix_spawn_file_actions_adddup2(&actions, writeFD, 1)
+        posix_spawn_file_actions_adddup2(&actions, writeFD, 2)
+        posix_spawn_file_actions_addclose(&actions, readFD)
+
+        let arguments = ["/bin/zsh", "-l", "-c", script].map { strdup($0) } + [nil]
+        let environment = Self.environment().map { strdup("\($0.key)=\($0.value)") } + [nil]
+        defer {
+            arguments.forEach { free($0) }
+            environment.forEach { free($0) }
         }
-        try process.run()
+        var pid: pid_t = 0
+        let result = posix_spawn(&pid, "/bin/zsh", &actions, &attributes, arguments, environment)
+        close(writeFD)
+        guard result == 0 else {
+            close(readFD)
+            throw ShellProcessError.spawnFailed(result)
+        }
+        processGroup = pid
+        reader = FileHandle(fileDescriptor: readFD, closeOnDealloc: true)
+        reader.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if data.isEmpty { handle.readabilityHandler = nil }
+            self?.append(String(decoding: data, as: UTF8.self))
+        }
     }
 
-    var isRunning: Bool { process.isRunning }
+    var isRunning: Bool { exitCode == nil }
 
-    var exitCode: Int32? { process.isRunning ? nil : process.terminationStatus }
+    var exitCode: Int32? {
+        lock.withLock {
+            if let status { return status }
+            var raw: Int32 = 0
+            guard waitpid(processGroup, &raw, WNOHANG) == processGroup else { return nil }
+            // WIFEXITED / WEXITSTATUS are macros Swift cannot import.
+            let finished: Int32 = (raw & 0x7f) == 0 ? (raw >> 8) & 0xff : 128 + (raw & 0x7f)
+            status = finished
+            return finished
+        }
+    }
 
     var output: String { lock.withLock { buffer } }
 
-    /// Kills the whole tree: `aws ssm start-session` leaves session-manager-plugin as a
-    /// grandchild that would otherwise keep the port open.
     func terminate() {
-        guard process.isRunning else { return }
-        let pid = process.processIdentifier
-        (Self.descendants(of: pid) + [pid]).forEach { kill($0, SIGTERM) }
+        // The negative pid signals the whole group, including grandchildren.
+        let group = processGroup
+        kill(-group, SIGTERM)
+        _ = exitCode
+        onFinish?(group)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+            if kill(-group, 0) == 0 { kill(-group, SIGKILL) }
+        }
     }
 
     private func append(_ chunk: String) {
@@ -54,22 +120,12 @@ final class ShellProcess: RunningScript, @unchecked Sendable {
         }
     }
 
-    private static func descendants(of pid: pid_t) -> [pid_t] {
-        let children = childPIDs(of: pid)
-        return children.flatMap { descendants(of: $0) } + children
-    }
-
-    private static func childPIDs(of pid: pid_t) -> [pid_t] {
-        let pgrep = Process()
-        pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        pgrep.arguments = ["-P", String(pid)]
-        let pipe = Pipe()
-        pgrep.standardOutput = pipe
-        pgrep.standardError = FileHandle.nullDevice
-        guard (try? pgrep.run()) != nil else { return [] }
-        pgrep.waitUntilExit()
-        let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        return text.split(whereSeparator: \.isNewline).compactMap { pid_t($0) }
+    private static func environment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        let extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        environment["PATH"] = ([environment["PATH"]].compactMap { $0 } + extraPaths).joined(separator: ":")
+        environment["AWS_PAGER"] = ""
+        return environment
     }
 }
 

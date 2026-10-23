@@ -56,6 +56,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         WindowSnapshotter.startIfRequested()
+        terminateGracefullyOnSIGTERM()
+    }
+
+    private var signalSource: DispatchSourceSignal?
+
+    /// `pkill` and logout send SIGTERM: route it through NSApp.terminate so
+    /// applicationWillTerminate closes the tunnels.
+    private func terminateGracefullyOnSIGTERM() {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { NSApp.terminate(nil) }
+        source.resume()
+        signalSource = source
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
