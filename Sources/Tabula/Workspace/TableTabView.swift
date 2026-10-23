@@ -40,7 +40,8 @@ struct TableTabView: View {
                 onEdit: { table.setValue($2, row: $0, column: $1) },
                 onSort: { column, ascending in Task { await table.sort(by: column, ascending: ascending) } },
                 table: table.reference,
-                onDeleteRows: table.canEdit ? { table.deleteSelectedRows() } : nil
+                onDeleteRows: table.canEdit ? { table.deleteSelectedRows() } : nil,
+                firstRowNumber: table.query.page * table.query.pageSize + 1
             ),
             selection: $table.selectedRows
         )

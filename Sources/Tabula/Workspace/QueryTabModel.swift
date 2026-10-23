@@ -2,11 +2,46 @@ import Foundation
 import Observation
 import TabulaCore
 
-struct StatementOutcome: Identifiable {
+/// One statement's result, filled chunk by chunk while the server streams it.
+@MainActor
+@Observable
+final class StatementOutcome: Identifiable {
     let id = UUID()
     let statement: String
-    let result: QueryResult?
-    let error: String?
+    let startedAt = Date()
+    private(set) var columns: [ResultColumn] = []
+    private(set) var rows: [[CellValue]] = []
+    private(set) var commandTag = ""
+    private(set) var duration: TimeInterval?
+    private(set) var error: String?
+    /// Bumped on every chunk so the grid knows to redraw.
+    private(set) var revision = 0
+
+    init(statement: String) {
+        self.statement = statement
+    }
+
+    var isRunning: Bool { duration == nil && error == nil }
+    var returnsRows: Bool { !columns.isEmpty }
+
+    func append(_ chunk: ResultChunk) {
+        if columns.isEmpty { columns = chunk.columns }
+        rows.append(contentsOf: chunk.rows)
+        revision += 1
+    }
+
+    func finish(_ summary: StreamSummary) {
+        if columns.isEmpty { columns = summary.columns }
+        commandTag = summary.commandTag
+        duration = summary.duration
+        revision += 1
+    }
+
+    func fail(_ message: String) {
+        error = message
+        duration = Date().timeIntervalSince(startedAt)
+        revision += 1
+    }
 }
 
 @MainActor
@@ -21,10 +56,11 @@ final class QueryTabModel {
     var selectedOutcomeID: UUID?
     private(set) var isRunning = false
     var selectedRows = IndexSet()
+    /// TablePlus's "No limit / 100 / 300 …" popup; 0 means no limit.
+    var rowLimit = 0
+    var resultSearch = ""
 
     private unowned let workspace: WorkspaceModel
-
-    var catalog: SchemaCatalog { workspace.catalog }
 
     init(title: String, text: String, workspace: WorkspaceModel) {
         self.title = title
@@ -32,9 +68,31 @@ final class QueryTabModel {
         self.workspace = workspace
     }
 
+    var catalog: SchemaCatalog { workspace.catalog }
+
     var selectedOutcome: StatementOutcome? {
         outcomes.first { $0.id == selectedOutcomeID } ?? outcomes.last
     }
+
+    /// "line 2, column 15, location 23", as in TablePlus's editor footer.
+    var cursorDescription: String {
+        let location = min(selection.location, (text as NSString).length)
+        let before = (text as NSString).substring(to: location)
+        let line = before.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+        let column = (before.split(separator: "\n", omittingEmptySubsequences: false).last?.utf16.count ?? 0) + 1
+        return "riga \(line), colonna \(column), posizione \(location)"
+    }
+
+    /// Indexes of the rows matching the result search box.
+    func visibleRows(of outcome: StatementOutcome) -> [Int] {
+        let query = resultSearch.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return Array(outcome.rows.indices) }
+        return outcome.rows.indices.filter { index in
+            outcome.rows[index].contains { $0.textValue?.localizedCaseInsensitiveContains(query) == true }
+        }
+    }
+
+    // MARK: Running
 
     /// ⌘↩: the selection if there is one, otherwise the statement under the cursor.
     func runCurrent() async {
@@ -49,26 +107,53 @@ final class QueryTabModel {
         await run(StatementSplitter.split(text).map(\.text))
     }
 
+    func cancel() {
+        workspace.cancelRunningQuery()
+    }
+
+    /// ⌘I: formats the selection, or the whole editor when nothing is selected.
+    func beautify() {
+        if selection.length > 0, let range = Range(selection, in: text) {
+            text.replaceSubrange(range, with: SQLBeautifier.format(String(text[range])))
+        } else {
+            text = SQLBeautifier.format(text)
+        }
+    }
+
     private func run(_ statements: [String]) async {
         guard !statements.isEmpty, !isRunning else { return }
         isRunning = true
         defer { isRunning = false }
-        var collected: [StatementOutcome] = []
-        for statement in statements {
-            do {
-                collected.append(StatementOutcome(statement: statement, result: try await workspace.run(statement), error: nil))
-            } catch is CancellationError {
-                break
-            } catch {
-                collected.append(StatementOutcome(statement: statement, result: nil, error: error.localizedDescription))
-                break
-            }
-        }
-        guard !collected.isEmpty else { return }
-        outcomes = collected
-        selectedOutcomeID = collected.last(where: { $0.result?.returnsRows == true })?.id ?? collected.last?.id
+        outcomes = []
         selectedRows = []
-        if collected.contains(where: { isSchemaChange($0.statement) }) { await workspace.loadTables() }
+        resultSearch = ""
+        for statement in statements {
+            let outcome = StatementOutcome(statement: statement)
+            outcomes.append(outcome)
+            selectedOutcomeID = outcome.id
+            guard await stream(QueryLimit.apply(rowLimit, to: statement), into: outcome) else { break }
+        }
+        selectedOutcomeID = outcomes.last(where: \.returnsRows)?.id ?? outcomes.last?.id
+        if outcomes.contains(where: { isSchemaChange($0.statement) }) { await workspace.loadTables() }
+    }
+
+    /// Returns false when the script must stop (error or cancelled confirmation).
+    private func stream(_ sql: String, into outcome: StatementOutcome) async -> Bool {
+        do {
+            let summary = try await workspace.stream(sql) { chunk in
+                Task { @MainActor in outcome.append(chunk) }
+            }
+            // Chunks hop to the main actor asynchronously; let them land before finishing.
+            await Task.yield()
+            outcome.finish(summary)
+            return true
+        } catch is CancellationError {
+            outcomes.removeAll { $0.id == outcome.id }
+            return false
+        } catch {
+            outcome.fail(error.localizedDescription)
+            return false
+        }
     }
 
     private func isSchemaChange(_ statement: String) -> Bool {

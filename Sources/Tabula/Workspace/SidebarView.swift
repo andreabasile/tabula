@@ -5,18 +5,20 @@ struct SidebarView: View {
     @Bindable var model: WorkspaceModel
     @State private var search = ""
     @State private var selection: TableReference?
+    @State private var showsTables = true
+    @State private var showsViews = true
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            schemaHeader
+            searchField
             List(selection: $selection) {
-                section("Tabelle", kinds: [.table])
-                section("Viste", kinds: [.view, .materializedView])
+                section("Tabelle", kinds: [.table], isExpanded: $showsTables)
+                section("Viste", kinds: [.view, .materializedView], isExpanded: $showsViews)
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
-            .environment(\.defaultMinListRowHeight, 22)
+            .environment(\.defaultMinListRowHeight, 20)
             .overlay {
                 if model.phase == .connected, model.tables.isEmpty {
                     Text("Nessuna tabella in \(model.selectedSchema)").font(.callout).foregroundStyle(.secondary)
@@ -29,64 +31,74 @@ struct SidebarView: View {
             .onChange(of: model.selectedTabID) { _, _ in
                 if case .table(let table) = model.selectedTab { selection = table.reference }
             }
-            Divider()
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.tertiary)
-                TextField("Cerca un elemento…", text: $search)
-                    .textFieldStyle(.plain)
-                    .focused($isSearchFocused)
-                    .onChange(of: model.tableSearchFocusRequest) { isSearchFocused = true }
-                if !search.isEmpty {
-                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .font(.callout)
-            .padding(.horizontal, 10)
-            .frame(height: 30)
+            footer
         }
         .background(Theme.surface)
         .overlay(alignment: .top) { Divider() }
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
     }
 
-    @ViewBuilder
-    private var schemaHeader: some View {
-        if model.schemas.count > 1 {
-            Menu {
-                Picker("Schema", selection: $model.selectedSchema) {
-                    ForEach(model.schemas, id: \.self) { Text($0).tag($0) }
-                }
-                .pickerStyle(.inline)
-            } label: {
-                Label(model.selectedSchema, systemImage: "square.stack.3d.up")
+    /// Search on top, as in TablePlus's "Search for item…".
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.tertiary)
+            TextField("Cerca un elemento…", text: $search)
+                .textFieldStyle(.plain)
+                .focused($isSearchFocused)
+                .onChange(of: model.tableSearchFocusRequest) { isSearchFocused = true }
+            if !search.isEmpty {
+                Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.tertiary)
             }
-            .menuStyle(.borderlessButton)
-            .font(.callout)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            Divider()
         }
+        .font(.callout)
+        .padding(.horizontal, 8)
+        .frame(height: 26)
+        .background(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
+        .padding(8)
+    }
+
+    /// "+" for a new query and the schema popup at the bottom, as in TablePlus.
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Button { model.newQueryTab() } label: { Image(systemName: "plus") }
+                .buttonStyle(.borderless)
+                .help("Nuova query (⌘T)")
+            Picker("", selection: $model.selectedSchema) {
+                ForEach(model.schemas, id: \.self) { Text($0).tag($0) }
+            }
+            .labelsHidden()
+            .controlSize(.small)
+            .disabled(model.schemas.count < 2)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 32)
+        .overlay(alignment: .top) { Divider() }
     }
 
     @ViewBuilder
-    private func section(_ title: String, kinds: Set<TableKind>) -> some View {
+    private func section(_ title: String, kinds: Set<TableKind>, isExpanded: Binding<Bool>) -> some View {
         let items = visibleTables.filter { kinds.contains($0.kind) }
         if !items.isEmpty {
-            Section(title) {
+            Section(isExpanded: isExpanded) {
                 ForEach(items) { table in
                     HStack(spacing: 6) {
                         Image(systemName: icon(for: table.kind))
                             .font(.system(size: 11))
                             .foregroundStyle(table.kind == .table ? Color.accentColor : .purple)
                             .frame(width: 14)
-                        Text(table.name).font(.system(size: 12.5)).lineLimit(1).truncationMode(.middle)
+                        Text(table.name)
+                            .font(.system(size: 12, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
                     .help(table.name)
                     .tag(table.reference)
                     .contextMenu { contextMenu(for: table) }
                 }
+            } header: {
+                Text("\(title) (\(items.count))")
             }
         }
     }

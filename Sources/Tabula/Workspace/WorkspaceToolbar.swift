@@ -53,6 +53,7 @@ struct StatusPill: View {
                     Circle().fill(dotColor).frame(width: 7, height: 7)
                 }
                 Text(title)
+                    .font(.system(size: 12, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if model.isDSQL, model.phase == .connected {
@@ -62,7 +63,7 @@ struct StatusPill: View {
             .font(.system(size: 12, weight: .medium))
             .foregroundStyle(foreground)
             .padding(.horizontal, 12)
-            .frame(minWidth: 360, maxWidth: 560, minHeight: 24)
+            .frame(minWidth: 420, maxWidth: 900, minHeight: 24)
             .background(background, in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.black.opacity(0.08)))
         }
@@ -72,6 +73,7 @@ struct StatusPill: View {
         }
     }
 
+    /// "TESTING | PostgreSQL 16.11 : TLSv1.3 : shop TEST : shop : SQL Query", as TablePlus.
     private var title: String {
         let connection = model.connection
         let state = switch model.phase {
@@ -80,22 +82,25 @@ struct StatusPill: View {
         default: ""
         }
         let database = model.currentDatabase.isEmpty ? connection.database : model.currentDatabase
-        return "\(connection.kind.driverName) : \(connection.name) : \(database)\(state)"
+        let server = [model.status.server.version.map { "\(connection.kind.driverName) \($0)" } ?? connection.kind.driverName, model.status.server.tlsProtocol]
+        let parts = server.compactMap { $0 } + [connection.name, database, model.selectedTab?.title].compactMap { $0 }
+        return "\(connection.tag.title.uppercased()) | " + parts.joined(separator: " : ") + state
     }
 
     private var isBusy: Bool { model.phase == .connecting || model.runningQueries > 0 }
 
     private var isTinted: Bool { model.connection.tag != .local }
 
+    /// A pale wash of the tag colour, like TablePlus, rather than a saturated fill.
     private var background: Color {
-        isTinted ? model.connection.tag.color : Color(nsColor: .controlBackgroundColor)
+        isTinted ? model.connection.tag.color.opacity(0.28) : Color(nsColor: .controlBackgroundColor)
     }
 
-    private var foreground: Color { isTinted ? .white : .primary }
+    private var foreground: Color { .primary }
 
     private var dotColor: Color {
         switch model.phase {
-        case .connected: isTinted ? .white : .green
+        case .connected: isTinted ? model.connection.tag.color : .green
         case .connecting, .needsPassword: .yellow
         case .failed: .orange
         }

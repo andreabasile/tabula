@@ -183,6 +183,22 @@ final class WorkspaceModel {
         return try await logged(sql) { try await session.execute(sql) }
     }
 
+    /// Like `run`, but rows reach `onChunk` while the server is still sending them.
+    func stream(_ sql: String, onChunk: @escaping @Sendable (ResultChunk) -> Void) async throws -> StreamSummary {
+        guard await confirmIfNeeded([sql]) else { throw CancellationError() }
+        var summary: StreamSummary?
+        _ = try await logged(sql) {
+            let streamed = try await session.stream(sql, onChunk: onChunk)
+            summary = streamed
+            return QueryResult(columns: streamed.columns, rows: [], commandTag: streamed.commandTag, duration: streamed.duration)
+        }
+        return summary!
+    }
+
+    func cancelRunningQuery() {
+        Task { await session.cancelRunningQuery() }
+    }
+
     /// Runs metadata queries without safe-mode prompts; they are read-only by construction.
     func runInternal(_ sql: String) async throws -> QueryResult {
         try await logged(sql) { try await session.execute(sql) }
@@ -213,7 +229,7 @@ final class WorkspaceModel {
 
     private func summary(of result: QueryResult) -> String {
         let time = String(format: "%.0f ms", result.duration * 1000)
-        return result.returnsRows ? "\(result.rows.count) righe · \(time)" : "\(result.commandTag) · \(time)"
+        return result.returnsRows && !result.rows.isEmpty ? "\(result.rows.count) righe · \(time)" : "\(result.commandTag) · \(time)"
     }
 
     private func append(_ entry: LogEntry) {
@@ -261,15 +277,19 @@ final class WorkspaceModel {
         guard let flag = arguments.firstIndex(of: "--table"), arguments.indices.contains(flag + 1),
               let table = tables.first(where: { $0.name == arguments[flag + 1] })
         else {
-            if let queryFlag = arguments.firstIndex(of: "--query"), arguments.indices.contains(queryFlag + 1) {
-                newQueryTab(sql: arguments[queryFlag + 1])
-            }
+            openQueryFromLaunchArguments(arguments)
             return
         }
         openTable(table)
-        if let queryFlag = arguments.firstIndex(of: "--query"), arguments.indices.contains(queryFlag + 1) {
-            newQueryTab(sql: arguments[queryFlag + 1])
-        }
+        openQueryFromLaunchArguments(arguments)
+    }
+
+    /// `--query "<sql>"` opens it in an editor; with `--run` it is executed straight away.
+    private func openQueryFromLaunchArguments(_ arguments: [String]) {
+        guard let flag = arguments.firstIndex(of: "--query"), arguments.indices.contains(flag + 1) else { return }
+        newQueryTab(sql: arguments[flag + 1])
+        guard arguments.contains("--run"), case .query(let query) = selectedTab else { return }
+        Task { await query.runAll() }
     }
 
     func loadTables() async {

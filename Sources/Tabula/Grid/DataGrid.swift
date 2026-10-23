@@ -14,6 +14,8 @@ struct DataGridSource {
     var onSort: ((String, Bool) -> Void)?
     var table: TableReference?
     var onDeleteRows: (() -> Void)?
+    /// Number shown on the first row: 1, or the page offset + 1 for table pages.
+    var firstRowNumber = 1
 }
 
 struct DataGrid: NSViewRepresentable {
@@ -71,14 +73,25 @@ struct DataGrid: NSViewRepresentable {
             self.parent = parent
         }
 
+        static let rowNumberIdentifier = NSUserInterfaceItemIdentifier("rownumber")
+
         func rebuildColumns() {
             guard let tableView else { return }
             tableView.tableColumns.forEach(tableView.removeTableColumn)
+            guard !parent.source.columns.isEmpty else { return tableView.reloadData() }
+            let numbers = NSTableColumn(identifier: Self.rowNumberIdentifier)
+            numbers.title = ""
+            numbers.width = CGFloat(max(String(parent.source.firstRowNumber + 99_999).count, 3)) * 7.5 + 12
+            numbers.minWidth = 30
+            numbers.resizingMask = []
+            tableView.addTableColumn(numbers)
             for (index, column) in parent.source.columns.enumerated() {
                 let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(String(index)))
                 tableColumn.title = column.name
                 tableColumn.headerToolTip = column.typeName
-                tableColumn.width = Self.initialWidth(for: column)
+                tableColumn.headerCell.alignment = .center
+                tableColumn.headerCell.font = .systemFont(ofSize: 12, weight: .medium)
+                tableColumn.width = contentWidth(for: index, column: column)
                 tableColumn.minWidth = 40
                 if parent.source.onSort != nil {
                     tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.name, ascending: true)
@@ -88,17 +101,13 @@ struct DataGrid: NSViewRepresentable {
             tableView.reloadData()
         }
 
-        private static func initialWidth(for column: ResultColumn) -> CGFloat {
-            let base = CGFloat(column.name.count) * 7.5 + 28
-            let typical: CGFloat = switch column.typeName {
-            case "bool": 60
-            case "int2", "int4", "int8", "oid": 80
-            case "uuid": 290
-            case "timestamptz", "timestamp": 220
-            case "date": 100
-            default: 160
+        /// Sized to the widest of the header and the first rows, as TablePlus does.
+        private func contentWidth(for index: Int, column: ResultColumn) -> CGFloat {
+            let sample = min(parent.source.rowCount, 200)
+            let longest = (0..<sample).reduce(column.name.count + 2) { widest, row in
+                max(widest, GridCell.displayString(parent.source.value(row, index), typeName: column.typeName).count)
             }
-            return min(max(base, typical), 420)
+            return min(max(CGFloat(longest) * 7.3 + 18, 56), 480)
         }
 
         func numberOfRows(in tableView: NSTableView) -> Int {
@@ -106,10 +115,15 @@ struct DataGrid: NSViewRepresentable {
         }
 
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+            if tableColumn?.identifier == Self.rowNumberIdentifier {
+                let cell = tableView.makeView(withIdentifier: RowNumberCell.identifier, owner: nil) as? RowNumberCell ?? RowNumberCell()
+                cell.textField?.stringValue = String(parent.source.firstRowNumber + row)
+                return cell
+            }
             guard let tableColumn, let column = Int(tableColumn.identifier.rawValue) else { return nil }
             let cell = tableView.makeView(withIdentifier: GridCell.identifier, owner: nil) as? GridCell ?? GridCell()
             let value = parent.source.value(row, column)
-            cell.configure(value: value, state: parent.source.state(row, column), editable: parent.source.isEditable)
+            cell.configure(value: value, typeName: parent.source.columns[column].typeName, state: parent.source.state(row, column), editable: parent.source.isEditable)
             cell.textField?.delegate = self
             cell.textField?.tag = column
             return cell
@@ -138,7 +152,7 @@ struct DataGrid: NSViewRepresentable {
             let typed = field.stringValue
             let current = parent.source.value(row, column)
             // NULL/DEFAULT/EMPTY show as placeholders, so an untouched cell reads back as "".
-            guard typed != GridCell.editableString(current) else { return }
+            guard typed != GridCell.editableString(current, typeName: parent.source.columns[column].typeName) else { return }
             parent.source.onEdit(row, column, .text(typed))
         }
 
@@ -268,7 +282,7 @@ final class GridCell: NSTableCellView {
         field.drawsBackground = false
         field.lineBreakMode = .byTruncatingTail
         field.cell?.usesSingleLineMode = true
-        field.font = .systemFont(ofSize: 12)
+        field.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         field.translatesAutoresizingMaskIntoConstraints = false
         addSubview(field)
         textField = field
@@ -282,9 +296,15 @@ final class GridCell: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    /// Multi-line values are shown on one line, as TablePlus does.
-    static func editableString(_ value: CellValue) -> String {
-        (value.textValue ?? "").replacingOccurrences(of: "\n", with: "⏎")
+    /// Multi-line values are shown on one line and booleans as TRUE/FALSE, as TablePlus does.
+    static func editableString(_ value: CellValue, typeName: String) -> String {
+        guard let text = value.textValue else { return "" }
+        if typeName == "bool" { return text == "t" ? "TRUE" : text == "f" ? "FALSE" : text }
+        return text.replacingOccurrences(of: "\n", with: "⏎")
+    }
+
+    static func displayString(_ value: CellValue, typeName: String) -> String {
+        value.textValue == nil ? value.displayText : editableString(value, typeName: typeName)
     }
 
     private static func placeholder(for value: CellValue) -> String? {
@@ -295,13 +315,14 @@ final class GridCell: NSTableCellView {
         }
     }
 
-    func configure(value: CellValue, state: CellState, editable: Bool) {
+    func configure(value: CellValue, typeName: String, state: CellState, editable: Bool) {
         guard let field = textField else { return }
-        field.stringValue = Self.editableString(value)
+        field.stringValue = Self.editableString(value, typeName: typeName)
+        field.alignment = ["int2", "int4", "int8", "numeric", "float4", "float8", "oid", "money"].contains(typeName) ? .right : .left
         field.placeholderAttributedString = Self.placeholder(for: value).map {
             NSAttributedString(string: $0, attributes: [
                 .foregroundColor: NSColor.tertiaryLabelColor,
-                .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
             ])
         }
         field.isEditable = editable && state != .deleted
@@ -313,6 +334,29 @@ final class GridCell: NSTableCellView {
         case .deleted: NSColor.systemRed.withAlphaComponent(0.25).cgColor
         }
     }
+}
+
+final class RowNumberCell: NSTableCellView {
+    static let identifier = NSUserInterfaceItemIdentifier("RowNumberCell")
+
+    init() {
+        super.init(frame: .zero)
+        identifier = Self.identifier
+        let field = NSTextField(labelWithString: "")
+        field.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        field.textColor = .tertiaryLabelColor
+        field.alignment = .right
+        field.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(field)
+        textField = field
+        NSLayoutConstraint.activate([
+            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+            field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            field.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
 }
 
 enum Pasteboard {
