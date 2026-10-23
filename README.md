@@ -5,7 +5,17 @@ Con DSQL la password è un token IAM generato con la AWS CLI e le credenziali lo
 profilo scelto (SSO, assume-role, chiavi): Tabula lo rinnova da sola e ricrea la connessione
 prima del limite di 60 minuti di DSQL o quando il server la chiude.
 
-## Requisiti
+## Installazione
+
+```bash
+brew install --cask andreabasile/tap/tabula
+```
+
+Solo Apple Silicon, macOS 15+. L'app è firmata ma non notarizzata: il cask le toglie la quarantena
+dopo l'installazione, altrimenti Gatekeeper ne bloccherebbe l'apertura.
+
+## Sviluppo
+
 
 - macOS 15+, Swift 6
 - `brew install libpq` (per compilare; l'app finale include libpq nel bundle)
@@ -18,6 +28,7 @@ swift test                       # test del nucleo
 swift run Tabula                 # avvio in sviluppo
 ./scripts/build-app.sh           # build/Tabula.app firmata
 ./scripts/build-app.sh --install # copia in /Applications e apre
+./scripts/release.sh 1.0.1       # release su GitHub e aggiornamento del cask nel tap
 ```
 
 Avvio diretto su connessioni salvate: `Tabula --connect "<nome>" [--connect "<altra>"] [--table <tabella>]`.
@@ -58,13 +69,13 @@ host/porta/utente/database, restano deselezionate. Da terminale:
 
 ## Più connessioni
 
-Ogni connessione si apre in una tab nativa della finestra (come "Open in new Tab" di TablePlus);
-⌘K apre il selettore anche dentro il workspace, con "In una nuova finestra" per staccarla.
+Come in TablePlus le connessioni aperte stanno nella colonna a sinistra della finestra, con
+l'icona colorata secondo il tag; ⌘K ne apre un'altra, ⌘1…⌘9 passano dall'una all'altra.
 Per PostgreSQL ⌘D cambia database sullo stesso server. Il riquadro al centro della barra è
 colorato secondo il tag; cliccandolo si vedono host, utente, token e i pulsanti Riconnetti/Disconnetti.
 
 ## Scorciatoie
 
-⌘K apri connessione · ⌘D apri database · ⇧⌘0 gestisci connessioni · ⌘T nuova query ·
+⌘K apri connessione · ⌘1…⌘9 cambia connessione · ⌘D apri database · ⇧⌘0 gestisci connessioni · ⌘T nuova query ·
 ⌘↩ esegui statement corrente o selezione · ⇧⌘↩ esegui tutto · ⌘S salva modifiche · ⌘F filtri ·
 ⌘P cerca tabella · ⌘R aggiorna · ⇧⌘R riconnetti · ⇧⌘C console · ⌘] dettaglio riga
