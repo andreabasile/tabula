@@ -39,6 +39,25 @@ public actor ManagedSession {
         try await withReconnect(retrySafe: StatementClassifier.isReadOnly(sql)) { try await $0.execute(sql) }
     }
 
+    /// Streams rows; a dropped connection is retried only for reads that delivered nothing yet.
+    public func stream(_ sql: String, chunkSize: Int = 500, onChunk: @escaping @Sendable (ResultChunk) -> Void) async throws -> StreamSummary {
+        let delivered = DeliveryFlag()
+        let tracking: @Sendable (ResultChunk) -> Void = { chunk in
+            delivered.mark()
+            onChunk(chunk)
+        }
+        do {
+            return try await withReconnect(retrySafe: false) { try await $0.stream(sql, chunkSize: chunkSize, onChunk: tracking) }
+        } catch let error as DatabaseError where error.isConnectionLevel && !delivered.value && StatementClassifier.isReadOnly(sql) {
+            return try await activeClient().stream(sql, chunkSize: chunkSize, onChunk: tracking)
+        }
+    }
+
+    /// Stops the statement currently running on this session, if any.
+    public func cancelRunningQuery() {
+        client?.cancel()
+    }
+
     public func executeInTransaction(_ statements: [String]) async throws {
         // A failed COMMIT is never replayed: we cannot know whether it landed.
         try await withReconnect(retrySafe: false) { try await $0.executeInTransaction(statements) }
@@ -89,6 +108,7 @@ public actor ManagedSession {
         status.openedAt = now()
         status.tokenIssuedAt = credentials.token?.issuedAt
         status.tokenExpiresAt = credentials.token?.expiresAt
+        status.server = await opened.serverInfo()
         if hasConnectedBefore { status.reconnectCount += 1 }
         hasConnectedBefore = true
         publish()
@@ -116,4 +136,11 @@ public actor ManagedSession {
     private func publish() {
         statusListener?(status)
     }
+}
+
+final class DeliveryFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var delivered = false
+    func mark() { lock.withLock { delivered = true } }
+    var value: Bool { lock.withLock { delivered } }
 }

@@ -59,6 +59,18 @@ public final class LibPQClient: DatabaseClient, @unchecked Sendable {
         }
     }
 
+    public func stream(_ sql: String, chunkSize: Int, onChunk: @escaping @Sendable (ResultChunk) -> Void) async throws -> StreamSummary {
+        try await Self.perform(on: queue) { [self] in try runStreaming(sql, chunkSize: chunkSize, onChunk: onChunk) }
+    }
+
+    public func serverInfo() async -> ServerInfo {
+        (try? await Self.perform(on: queue) { [self] in
+            let version = PQparameterStatus(connection, "server_version").map { String(cString: $0) }
+            let tls = PQsslInUse(connection) == 1 ? PQsslAttribute(connection, "protocol").map { String(cString: $0) } : nil
+            return ServerInfo(version: version, tlsProtocol: tls)
+        }) ?? ServerInfo()
+    }
+
     public func cancel() {
         guard let cancelHandle else { return }
         var buffer = [CChar](repeating: 0, count: 256)
@@ -108,6 +120,43 @@ public final class LibPQClient: DatabaseClient, @unchecked Sendable {
         if let failure { throw failure }
         if PQstatus(connection) != CONNECTION_OK { throw connectionLevelError() }
         return last ?? QueryResult(columns: [], rows: [], commandTag: "", duration: Date().timeIntervalSince(started))
+    }
+
+    private func runStreaming(_ sql: String, chunkSize: Int, onChunk: (ResultChunk) -> Void) throws -> StreamSummary {
+        guard !isClosed else { throw DatabaseError.connectionLost("connessione chiusa") }
+        let started = Date()
+        guard PQsendQuery(connection, sql) == 1 else { throw connectionLevelError() }
+        PQsetChunkedRowsMode(connection, Int32(max(chunkSize, 1)))
+        var columns: [ResultColumn] = []
+        var rowCount = 0
+        var commandTag = ""
+        var failure: DatabaseError?
+        while let result = PQgetResult(connection) {
+            defer { PQclear(result) }
+            switch PQresultStatus(result) {
+            case PGRES_TUPLES_CHUNK:
+                let chunk = LibPQResultReader.read(result, duration: 0)
+                columns = chunk.columns
+                rowCount += chunk.rows.count
+                onChunk(ResultChunk(columns: chunk.columns, rows: chunk.rows))
+            case PGRES_TUPLES_OK, PGRES_COMMAND_OK, PGRES_EMPTY_QUERY:
+                // In chunked mode the final TUPLES_OK carries no rows, only the shape and the tag.
+                let final = LibPQResultReader.read(result, duration: 0)
+                if columns.isEmpty { columns = final.columns }
+                if !final.rows.isEmpty {
+                    rowCount += final.rows.count
+                    onChunk(ResultChunk(columns: final.columns, rows: final.rows))
+                }
+                commandTag = final.commandTag
+            case PGRES_FATAL_ERROR:
+                failure = failure ?? serverError(result)
+            default:
+                continue
+            }
+        }
+        if let failure { throw failure }
+        if PQstatus(connection) != CONNECTION_OK { throw connectionLevelError() }
+        return StreamSummary(columns: columns, rowCount: rowCount, commandTag: commandTag, duration: Date().timeIntervalSince(started))
     }
 
     private func serverError(_ result: OpaquePointer) -> DatabaseError {
