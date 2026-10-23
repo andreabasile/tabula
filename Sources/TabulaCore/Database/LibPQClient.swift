@@ -243,7 +243,12 @@ enum LibPQResultReader {
         let fieldCount = PQnfields(result)
         let rowCount = PQntuples(result)
         let columns = (0..<fieldCount).map { field in
-            ResultColumn(name: String(cString: PQfname(result, field)), typeName: PostgresTypeNames.name(for: PQftype(result, field)))
+            ResultColumn(
+                name: String(cString: PQfname(result, field)),
+                typeName: PostgresTypeNames.name(for: PQftype(result, field)),
+                sourceTable: PQftable(result, field),
+                sourceColumn: Int(PQftablecol(result, field))
+            )
         }
         let rows = (0..<rowCount).map { row in
             (0..<fieldCount).map { field -> CellValue in

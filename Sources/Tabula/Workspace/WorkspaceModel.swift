@@ -78,6 +78,14 @@ final class WorkspaceModel: Identifiable {
     /// Holds this window's share of any tunnel opened by the pre-connect script.
     private let tunnelOwner = UUID()
     private var queryCounter = 0
+    /// Tables seen in query results: nil when the OID is not a plain table.
+    private var editableTables: [UInt32: EditableTable?] = [:]
+
+    private struct EditableTable {
+        let table: TableReference
+        let attributes: [Int: String]
+        let primaryKey: [String]
+    }
 
     init(connection: ConnectionConfig, appModel: AppModel) {
         self.connection = connection
@@ -205,6 +213,30 @@ final class WorkspaceModel: Identifiable {
         try await logged(sql) { try await session.execute(sql) }
     }
 
+    /// Where a query result's rows come from, if they can be edited; cached per table OID.
+    func resultSource(for columns: [ResultColumn]) async -> ResultSource? {
+        guard let oid = ResultSource.candidateTable(of: columns) else { return nil }
+        if let cached = editableTables[oid] {
+            return cached.flatMap { ResultSource.resolve(columns: columns, table: $0.table, oid: oid, attributes: $0.attributes, primaryKey: $0.primaryKey) }
+        }
+        guard let relation = try? await session.execute(Introspection.relation(oid: oid)) else { return nil }
+        guard let row = relation.rows.first, let schema = row.first?.textValue, let name = row.last?.textValue else {
+            editableTables[oid] = .some(nil)
+            return nil
+        }
+        let table = TableReference(schema: schema, name: name)
+        guard let attributes = try? await session.execute(Introspection.attributes(oid: oid)),
+              let columnsInfo = try? await session.execute(Introspection.columns(table))
+        else { return nil }
+        let info = EditableTable(
+            table: table,
+            attributes: ResultSource.parseAttributes(attributes),
+            primaryKey: Introspection.parseColumns(columnsInfo).filter(\.isPrimaryKey).map(\.name)
+        )
+        editableTables[oid] = info
+        return ResultSource.resolve(columns: columns, table: table, oid: oid, attributes: info.attributes, primaryKey: info.primaryKey)
+    }
+
     func commit(_ statements: [String]) async throws {
         guard await confirmIfNeeded(statements) else { throw CancellationError() }
         let script = statements.joined(separator: "\n")
@@ -294,6 +326,7 @@ final class WorkspaceModel: Identifiable {
     }
 
     func loadTables() async {
+        editableTables = [:]
         let schema = selectedSchema
         guard let result = try? await runInternal(Introspection.tables(schema: schema)) else { return }
         tables = Introspection.parseTables(result, schema: schema)

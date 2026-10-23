@@ -8,6 +8,8 @@ struct DataGridSource {
     var rowCount: Int
     var revision: Int
     var isEditable: Bool
+    /// Narrows `isEditable` per column, e.g. expressions in an editable query result.
+    var canEditColumn: (Int) -> Bool = { _ in true }
     var value: (Int, Int) -> CellValue
     var state: (Int, Int) -> CellState
     var onEdit: (Int, Int, CellValue) -> Void = { _, _, _ in }
@@ -123,7 +125,7 @@ struct DataGrid: NSViewRepresentable {
             guard let tableColumn, let column = Int(tableColumn.identifier.rawValue) else { return nil }
             let cell = tableView.makeView(withIdentifier: GridCell.identifier, owner: nil) as? GridCell ?? GridCell()
             let value = parent.source.value(row, column)
-            cell.configure(value: value, typeName: parent.source.columns[column].typeName, state: parent.source.state(row, column), editable: parent.source.isEditable)
+            cell.configure(value: value, typeName: parent.source.columns[column].typeName, state: parent.source.state(row, column), editable: parent.source.isEditable && parent.source.canEditColumn(column))
             cell.textField?.delegate = self
             cell.textField?.tag = column
             return cell
@@ -242,7 +244,11 @@ struct DataGrid: NSViewRepresentable {
 
         func validate(_ item: NSMenuItem) -> Bool {
             let editingActions: [Selector] = [#selector(setNull), #selector(setDefault), #selector(setEmpty)]
-            if let action = item.action, editingActions.contains(action) { return parent.source.isEditable }
+            if let action = item.action, editingActions.contains(action) {
+                let column = tableView?.clickedColumn ?? -1
+                let index = column >= 0 ? Int(tableView?.tableColumns[column].identifier.rawValue ?? "") : nil
+                return parent.source.isEditable && index.map(parent.source.canEditColumn) != false
+            }
             if item.action == #selector(deleteRows) { return parent.source.onDeleteRows != nil }
             return parent.source.rowCount > 0
         }

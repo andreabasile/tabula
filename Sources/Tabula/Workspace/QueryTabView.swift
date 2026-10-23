@@ -7,6 +7,7 @@ struct QueryTabView: View {
     @Bindable var query: QueryTabModel
     @State private var resultMode: ResultMode = .data
     @State private var showsSearch = false
+    @State private var showsPendingSQL = false
 
     var body: some View {
         VSplitView {
@@ -101,17 +102,26 @@ struct QueryTabView: View {
                 Spacer()
             } else if outcome.returnsRows {
                 let visible = query.visibleRows(of: outcome)
-                DataGrid(
-                    source: DataGridSource(
-                        columns: outcome.columns,
-                        rowCount: visible.count,
-                        revision: outcome.revision &+ query.resultSearch.hashValue,
-                        isEditable: false,
-                        value: { outcome.rows[visible[$0]][$1] },
-                        state: { _, _ in .normal }
-                    ),
-                    selection: $query.selectedRows
-                )
+                VStack(spacing: 0) {
+                    if let error = outcome.editError {
+                        ErrorBanner(message: error) { outcome.editError = nil }
+                    }
+                    DataGrid(
+                        source: DataGridSource(
+                            columns: outcome.columns,
+                            rowCount: visible.count,
+                            revision: outcome.revision &+ query.resultSearch.hashValue,
+                            isEditable: outcome.isEditable,
+                            canEditColumn: { outcome.canEdit(column: $0) },
+                            value: { outcome.value(row: visible[$0], column: $1) },
+                            state: { outcome.state(row: visible[$0], column: $1) },
+                            onEdit: { outcome.setValue($2, row: visible[$0], column: $1) },
+                            table: outcome.source?.table,
+                            onDeleteRows: outcome.isEditable ? { outcome.deleteRows(query.selectedRows.map { visible[$0] }) } : nil
+                        ),
+                        selection: $query.selectedRows
+                    )
+                }
             } else if outcome.isRunning {
                 ResultPlaceholder(systemImage: "hourglass", text: "In esecuzione…")
             } else {
@@ -186,6 +196,31 @@ struct QueryTabView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if let outcome = query.selectedOutcome, !outcome.changes.isEmpty {
+                Button("\(outcome.changes.count) modifiche") { showsPendingSQL = true }
+                    .buttonStyle(.link)
+                    .popover(isPresented: $showsPendingSQL, arrowEdge: .top) {
+                        ScrollView {
+                            Text(outcome.pendingStatements.joined(separator: "\n"))
+                                .font(.system(.callout, design: .monospaced))
+                                .textSelection(.enabled)
+                                .padding()
+                        }
+                        .frame(width: 520, height: 220)
+                    }
+                Button("Annulla") { outcome.discardChanges() }
+                Button("Salva ⌘S") { Task { await query.commit(outcome) } }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .keyboardShortcut("s")
+                BarDivider()
+            } else if let table = query.selectedOutcome?.source?.table, !query.isRunning {
+                Text(table.name)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .help("Risultato modificabile: le modifiche vanno su \(table.qualifiedName)")
+                BarDivider()
+            }
             Button { showsSearch.toggle() } label: { Image(systemName: "magnifyingglass") }
                 .help("Cerca nei risultati")
                 .disabled(query.selectedOutcome?.returnsRows != true)

@@ -91,6 +91,23 @@ public enum Introspection {
         """
     }
 
+    /// Schema and name of a plain or partitioned table, by OID; views and the like return no row.
+    public static func relation(oid: UInt32) -> String {
+        """
+        SELECT n.nspname, c.relname FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.oid = \(oid) AND c.relkind IN ('r', 'p')
+        """
+    }
+
+    /// Attribute number → column name, to map result columns back even when aliased.
+    public static func attributes(oid: UInt32) -> String {
+        """
+        SELECT attnum, attname FROM pg_attribute
+        WHERE attrelid = \(oid) AND attnum > 0 AND NOT attisdropped
+        """
+    }
+
     public static func indexes(_ table: TableReference) -> String {
         """
         SELECT indexname, indexdef FROM pg_indexes

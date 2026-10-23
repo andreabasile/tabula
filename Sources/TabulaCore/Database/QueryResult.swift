@@ -23,10 +23,16 @@ public enum CellValue: Equatable, Hashable, Sendable {
 public struct ResultColumn: Equatable, Hashable, Sendable {
     public let name: String
     public let typeName: String
+    /// OID of the table the column is read from, 0 for expressions (libpq's PQftable).
+    public let sourceTable: UInt32
+    /// The column's attribute number in that table, 0 when unknown (PQftablecol).
+    public let sourceColumn: Int
 
-    public init(name: String, typeName: String) {
+    public init(name: String, typeName: String, sourceTable: UInt32 = 0, sourceColumn: Int = 0) {
         self.name = name
         self.typeName = typeName
+        self.sourceTable = sourceTable
+        self.sourceColumn = sourceColumn
     }
 }
 
