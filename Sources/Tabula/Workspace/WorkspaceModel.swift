@@ -56,6 +56,8 @@ final class WorkspaceModel {
     private(set) var schemas: [String] = []
     var selectedSchema = "public" { didSet { if oldValue != selectedSchema { Task { await loadTables() } } } }
     private(set) var tables: [TableInfo] = []
+    /// Columns and keys of the current schema, for SQL autocompletion.
+    private(set) var catalog = SchemaCatalog()
     private(set) var tabs: [WorkspaceTab] = []
     var selectedTabID: UUID?
     private(set) var log: [LogEntry] = []
@@ -255,16 +257,33 @@ final class WorkspaceModel {
     /// `--table <name>` together with `--connect` opens that table on start.
     private func openTableFromLaunchArguments() {
         let arguments = CommandLine.arguments
-        guard tabs.isEmpty, let flag = arguments.firstIndex(of: "--table"), arguments.indices.contains(flag + 1),
+        guard tabs.isEmpty else { return }
+        guard let flag = arguments.firstIndex(of: "--table"), arguments.indices.contains(flag + 1),
               let table = tables.first(where: { $0.name == arguments[flag + 1] })
-        else { return }
+        else {
+            if let queryFlag = arguments.firstIndex(of: "--query"), arguments.indices.contains(queryFlag + 1) {
+                newQueryTab(sql: arguments[queryFlag + 1])
+            }
+            return
+        }
         openTable(table)
+        if let queryFlag = arguments.firstIndex(of: "--query"), arguments.indices.contains(queryFlag + 1) {
+            newQueryTab(sql: arguments[queryFlag + 1])
+        }
     }
 
     func loadTables() async {
         let schema = selectedSchema
         guard let result = try? await runInternal(Introspection.tables(schema: schema)) else { return }
         tables = Introspection.parseTables(result, schema: schema)
+        await loadCatalog(schema: schema)
+    }
+
+    private func loadCatalog(schema: String) async {
+        guard let columns = try? await runInternal(Introspection.allColumns(schema: schema)) else { return }
+        // Aurora DSQL has no foreign keys; the catalog then falls back to inferred joins.
+        let keys = try? await runInternal(Introspection.foreignKeys(schema: schema))
+        catalog = Introspection.parseCatalog(columns: columns, foreignKeys: keys)
     }
 
     // MARK: Tabs

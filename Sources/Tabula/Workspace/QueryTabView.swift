@@ -12,20 +12,24 @@ struct QueryTabView: View {
                     text: $query.text,
                     selection: $query.selection,
                     onRunCurrent: { Task { await query.runCurrent() } },
-                    onRunAll: { Task { await query.runAll() } }
+                    onRunAll: { Task { await query.runAll() } },
+                    catalog: query.catalog
                 )
                 editorBar
             }
-            .frame(minHeight: 120, idealHeight: 260)
-            results.frame(minHeight: 120)
+            .frame(maxWidth: .infinity, minHeight: 120, idealHeight: 280, maxHeight: .infinity)
+            results.frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var editorBar: some View {
         HStack {
             Button("Esegui corrente", systemImage: "play.fill") { Task { await query.runCurrent() } }
+                .foregroundStyle(Color.accentColor)
                 .help("⌘↩")
             Button("Esegui tutto", systemImage: "forward.fill") { Task { await query.runAll() } }
+                .foregroundStyle(.primary)
                 .help("⇧⌘↩")
             if query.isRunning { ProgressView().controlSize(.small) }
             Spacer()
@@ -79,10 +83,10 @@ struct QueryTabView: View {
                     selection: $query.selectedRows
                 )
             } else if let result = outcome.result {
-                ContentUnavailableView(result.commandTag, systemImage: "checkmark.circle", description: Text(String(format: "%.0f ms", result.duration * 1000)))
+                ResultPlaceholder(systemImage: "checkmark.circle", text: "\(result.commandTag) · \(String(format: "%.0f ms", result.duration * 1000))")
             }
         } else {
-            ContentUnavailableView("Nessun risultato", systemImage: "terminal", description: Text("Scrivi una query ed eseguila con ⌘↩"))
+            ResultPlaceholder(systemImage: "play", text: "⌘↩ esegue lo statement sotto il cursore, ⇧⌘↩ tutto lo script")
         }
     }
 
@@ -104,4 +108,17 @@ struct QueryTabView: View {
 private enum ResultMode: String, CaseIterable {
     case result = "Risultato"
     case message = "Messaggi"
+}
+
+private struct ResultPlaceholder: View {
+    let systemImage: String
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: systemImage)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.surface)
+    }
 }

@@ -47,6 +47,8 @@ struct SidebarView: View {
             .frame(height: 30)
         }
         .background(Theme.surface)
+        .overlay(alignment: .top) { Divider() }
+        .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
     }
 
     @ViewBuilder
@@ -79,8 +81,9 @@ struct SidebarView: View {
                             .font(.system(size: 11))
                             .foregroundStyle(table.kind == .table ? Color.accentColor : .purple)
                             .frame(width: 14)
-                        Text(table.name).font(.system(size: 12.5)).lineLimit(1)
+                        Text(table.name).font(.system(size: 12.5)).lineLimit(1).truncationMode(.middle)
                     }
+                    .help(table.name)
                     .tag(table.reference)
                     .contextMenu { contextMenu(for: table) }
                 }

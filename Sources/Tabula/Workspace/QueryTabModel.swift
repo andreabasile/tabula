@@ -24,6 +24,8 @@ final class QueryTabModel {
 
     private unowned let workspace: WorkspaceModel
 
+    var catalog: SchemaCatalog { workspace.catalog }
+
     init(title: String, text: String, workspace: WorkspaceModel) {
         self.title = title
         self.text = text

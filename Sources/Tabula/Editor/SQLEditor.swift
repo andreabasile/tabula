@@ -1,11 +1,13 @@
 import AppKit
 import SwiftUI
+import TabulaCore
 
 struct SQLEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var selection: NSRange
     var onRunCurrent: () -> Void
     var onRunAll: () -> Void
+    var catalog: SchemaCatalog = SchemaCatalog()
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -27,8 +29,15 @@ struct SQLEditor: NSViewRepresentable {
         editor.delegate = context.coordinator
         editor.onRunCurrent = { context.coordinator.parent.onRunCurrent() }
         editor.onRunAll = { context.coordinator.parent.onRunAll() }
+        editor.catalogProvider = { context.coordinator.parent.catalog }
         editor.string = text
+        editor.backgroundColor = Theme.surfaceNS
         scrollView.documentView = editor
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = Theme.surfaceNS
+        scrollView.verticalRulerView = LineNumberRuler(textView: editor)
+        scrollView.hasVerticalRuler = true
+        scrollView.rulersVisible = true
         SQLHighlighter.highlight(editor.textStorage)
         return scrollView
     }
@@ -49,9 +58,10 @@ struct SQLEditor: NSViewRepresentable {
         }
 
         func textDidChange(_ notification: Notification) {
-            guard let editor = notification.object as? NSTextView else { return }
+            guard let editor = notification.object as? SQLTextView else { return }
             parent.text = editor.string
             SQLHighlighter.highlight(editor.textStorage)
+            editor.updateCompletions(automatic: true)
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
@@ -64,10 +74,70 @@ struct SQLEditor: NSViewRepresentable {
 final class SQLTextView: NSTextView {
     var onRunCurrent: (() -> Void)?
     var onRunAll: (() -> Void)?
+    var catalogProvider: (() -> SchemaCatalog)?
+    private let popup = CompletionPopup()
+    private var replacementRange: Range<Int>?
+    private var isInsertingCompletion = false
+
+    /// Recomputes suggestions for the cursor. Automatic updates only open the list while a
+    /// word or `alias.` is being typed, or right after JOIN; ⌃Space/Esc always open it.
+    func updateCompletions(automatic: Bool) {
+        guard !isInsertingCompletion, let catalog = catalogProvider?() else { return }
+        let cursor = selectedRange().location
+        let result = SQLCompleter.complete(text: string, cursor: cursor, catalog: catalog)
+        let typedSomething = !result.replacementRange.isEmpty || precedingCharacter(at: cursor) == "."
+        let wantsJoins = result.items.first?.kind == .join && precedingCharacter(at: cursor) == " "
+        guard !automatic || popup.isVisible || typedSomething || wantsJoins,
+              !result.items.isEmpty, let window else {
+            popup.hide()
+            return
+        }
+        if automatic, result.items.count == 1, result.items[0].insertText.caseInsensitiveCompare(currentWord(result.replacementRange)) == .orderedSame {
+            popup.hide()
+            return
+        }
+        replacementRange = result.replacementRange
+        let caret = firstRect(forCharacterRange: NSRange(location: cursor, length: 0), actualRange: nil)
+        popup.onAccept = { [weak self] item in self?.accept(item) }
+        popup.show(result.items, below: NSPoint(x: caret.minX - 40, y: caret.minY), parent: window)
+    }
+
+    private func accept(_ item: CompletionItem) {
+        guard let range = replacementRange else { return }
+        isInsertingCompletion = true
+        insertText(item.insertText, replacementRange: NSRange(location: range.lowerBound, length: range.count))
+        isInsertingCompletion = false
+        popup.hide()
+    }
+
+    private func precedingCharacter(at cursor: Int) -> Character? {
+        guard cursor > 0 else { return nil }
+        return (string as NSString).substring(with: NSRange(location: cursor - 1, length: 1)).first
+    }
+
+    private func currentWord(_ range: Range<Int>) -> String {
+        (string as NSString).substring(with: NSRange(location: range.lowerBound, length: range.count))
+    }
+
+    override func resignFirstResponder() -> Bool {
+        popup.hide()
+        return super.resignFirstResponder()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard string.isEmpty else { return }
+        let hint = "-- Scrivi la query qui. ⌘↩ esegue lo statement corrente, ⇧⌘↩ tutto.\n-- ⌃Spazio o Esc per i suggerimenti; dopo JOIN propone tabella e condizione ON." as NSString
+        hint.draw(
+            at: NSPoint(x: textContainerInset.width + 5, y: textContainerInset.height),
+            withAttributes: [.font: SQLHighlighter.font, .foregroundColor: NSColor.placeholderTextColor]
+        )
+    }
 
     override func keyDown(with event: NSEvent) {
         let isReturn = event.keyCode == 36 || event.keyCode == 76
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if handleCompletionKey(event, isReturn: isReturn, flags: flags) { return }
         if isReturn, flags == [.command] {
             onRunCurrent?()
             return
@@ -77,6 +147,30 @@ final class SQLTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    private func handleCompletionKey(_ event: NSEvent, isReturn: Bool, flags: NSEvent.ModifierFlags) -> Bool {
+        let isEscape = event.keyCode == 53
+        let isControlSpace = event.keyCode == 49 && flags == [.control]
+        guard popup.isVisible else {
+            if isControlSpace || (isEscape && flags.isEmpty) {
+                updateCompletions(automatic: false)
+                return true
+            }
+            return false
+        }
+        switch event.keyCode {
+        case 125: popup.moveSelection(by: 1)
+        case 126: popup.moveSelection(by: -1)
+        case 121: popup.moveSelection(by: 8)
+        case 116: popup.moveSelection(by: -8)
+        case 48: popup.acceptSelection()
+        case 53: popup.hide()
+        default:
+            guard isReturn, flags.isEmpty else { return false }
+            popup.acceptSelection()
+        }
+        return true
     }
 }
 

@@ -40,7 +40,7 @@ private struct WorkspaceContent: View {
     var body: some View {
         NavigationSplitView {
             SidebarView(model: model)
-                .navigationSplitViewColumnWidth(min: 190, ideal: 230, max: 400)
+                .navigationSplitViewColumnWidth(min: 190, ideal: 270, max: 480)
         } detail: {
             VStack(spacing: 0) {
                 connectionBanner
@@ -61,6 +61,7 @@ private struct WorkspaceContent: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .top) { Divider() }
         }
         .toolbar { WorkspaceToolbar(model: model) }
         .toolbarBackground(Theme.surface, for: .windowToolbar)

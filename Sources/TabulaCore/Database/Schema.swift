@@ -100,6 +100,40 @@ public enum Introspection {
         """
     }
 
+    public static func allColumns(schema: String) -> String {
+        """
+        SELECT table_name, column_name FROM information_schema.columns
+        WHERE table_schema = \(SQLRendering.literal(.text(schema)))
+        ORDER BY table_name, ordinal_position
+        """
+    }
+
+    public static func foreignKeys(schema: String) -> String {
+        """
+        SELECT kcu.table_name, kcu.column_name, ccu.table_name, ccu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
+        JOIN information_schema.constraint_column_usage ccu
+          ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = \(SQLRendering.literal(.text(schema)))
+        """
+    }
+
+    public static func parseCatalog(columns: QueryResult, foreignKeys: QueryResult?) -> SchemaCatalog {
+        var byTable: [String: [String]] = [:]
+        for row in columns.rows {
+            guard row.count >= 2, let table = row[0].textValue, let column = row[1].textValue else { continue }
+            byTable[table, default: []].append(column)
+        }
+        let keys = (foreignKeys?.rows ?? []).compactMap { row -> ForeignKey? in
+            guard row.count >= 4, let table = row[0].textValue, let column = row[1].textValue,
+                  let target = row[2].textValue, let targetColumn = row[3].textValue else { return nil }
+            return ForeignKey(table: table, column: column, referencedTable: target, referencedColumn: targetColumn)
+        }
+        return SchemaCatalog(columns: byTable, foreignKeys: keys)
+    }
+
     public static func parseTables(_ result: QueryResult, schema: String) -> [TableInfo] {
         result.rows.compactMap { row in
             guard let name = row.first?.textValue else { return nil }
