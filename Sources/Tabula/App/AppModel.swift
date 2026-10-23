@@ -17,6 +17,7 @@ final class AppModel {
         self.store = store
         self.sessionFactory = SessionFactory(tokens: CachedTokenProvider(generator: AWSCLITokenGenerator()))
         reload()
+        importFromLaunchEnvironment()
     }
 
     func reload() {
@@ -46,6 +47,26 @@ final class AppModel {
         copy.id = UUID()
         copy.name += " copia"
         try save(copy, password: try store.password(for: connection.id))
+    }
+
+    func importConnections(_ items: [ImportedConnection]) throws {
+        for item in items { try store.save(item.connection, password: item.password) }
+        reload()
+    }
+
+    /// TABULA_IMPORT_FILE + TABULA_IMPORT_PASSWORD: import a TablePlus export at launch,
+    /// skipping servers already present. Lets the signed app own the Keychain items.
+    func importFromLaunchEnvironment() {
+        let environment = ProcessInfo.processInfo.environment
+        guard let path = environment["TABULA_IMPORT_FILE"] else { return }
+        do {
+            let result = try TablePlusImporter.read(Data(contentsOf: URL(fileURLWithPath: path)), password: environment["TABULA_IMPORT_PASSWORD"] ?? "")
+            let fresh = result.connections.filter { item in !connections.contains { $0.pointsToSameServer(as: item.connection) } }
+            try importConnections(fresh)
+            print("tabula: importate \(fresh.count) connessioni, \(result.connections.count - fresh.count) già presenti, \(result.skipped.count) saltate")
+        } catch {
+            print("tabula: import fallito: \(error.localizedDescription)")
+        }
     }
 
     func register(_ workspace: WorkspaceModel, target: UUID) {

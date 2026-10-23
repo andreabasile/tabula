@@ -34,6 +34,14 @@ Con `TABULA_SNAPSHOT_DIR=<cartella>` l'app salva ogni 3 secondi un PNG delle sue
 - La barra di stato mostra la validità del token, da quanto è aperta la connessione
   e quante riconnessioni ci sono state; "Riconnetti" (⇧⌘R) forza token e connessione nuovi.
 
+## Import da TablePlus
+
+"Importa da TablePlus…" nella finestra di benvenuto legge il file di File › Export Connections
+(cifrato RNCryptor v3 con la password scelta all'export), mostra l'anteprima e importa gruppi,
+tag, SSL, modalità sicura e password (nel Portachiavi). Le connessioni già presenti, stesso
+host/porta/utente/database, restano deselezionate. Da terminale:
+`TABULA_IMPORT_FILE=<file> TABULA_IMPORT_PASSWORD=<pw> Tabula`.
+
 ## Più connessioni
 
 Ogni connessione si apre in una tab nativa della finestra (come "Open in new Tab" di TablePlus);

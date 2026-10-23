@@ -79,7 +79,8 @@ struct StatusPill: View {
         case .failed: " — errore"
         default: ""
         }
-        return "\(connection.kind.driverName) : \(connection.name) : \(connection.database)\(state)"
+        let database = model.currentDatabase.isEmpty ? connection.database : model.currentDatabase
+        return "\(connection.kind.driverName) : \(connection.name) : \(database)\(state)"
     }
 
     private var isBusy: Bool { model.phase == .connecting || model.runningQueries > 0 }
@@ -138,7 +139,7 @@ struct ConnectionInfoView: View {
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 5) {
                 row("Host", model.connection.host)
                 row("Utente", model.connection.user)
-                row("Database", model.connection.database)
+                row("Database", model.currentDatabase.isEmpty ? model.connection.database : model.currentDatabase)
                 if case .dsql(let settings) = model.connection.kind {
                     row("Profilo AWS", settings.awsProfile.isEmpty ? "catena predefinita" : settings.awsProfile)
                     row("Regione", settings.resolvedRegion ?? "—")

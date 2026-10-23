@@ -92,7 +92,7 @@ struct OpenDatabaseSheet: View {
                     Image(systemName: "cylinder").foregroundStyle(.secondary)
                     Text(name)
                     Spacer()
-                    if name == model.connection.database {
+                    if name == model.currentDatabase {
                         Image(systemName: "checkmark").foregroundStyle(.tint)
                     }
                 }
@@ -101,7 +101,7 @@ struct OpenDatabaseSheet: View {
         }
         .task {
             await model.loadDatabases()
-            selection = model.connection.database
+            selection = model.currentDatabase
         }
     }
 

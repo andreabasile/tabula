@@ -51,6 +51,8 @@ final class WorkspaceModel {
     private(set) var phase: ConnectionPhase = .connecting
     private(set) var status = ConnectionStatus()
     private(set) var databases: [String] = []
+    /// The database actually in use: libpq falls back to the user name when none is set.
+    private(set) var currentDatabase = ""
     private(set) var schemas: [String] = []
     var selectedSchema = "public" { didSet { if oldValue != selectedSchema { Task { await loadTables() } } } }
     private(set) var tables: [TableInfo] = []
@@ -115,7 +117,7 @@ final class WorkspaceModel {
 
     /// Reopens the session on another database of the same server, closing open tabs.
     func switchDatabase(to database: String) async {
-        guard database != connection.database else { return }
+        guard database != currentDatabase else { return }
         await session.close()
         connection = connection.switchingDatabase(to: database)
         session = Self.makeSession(connection, factory: sessionFactory, passwordBox: passwordBox, storedPassword: storedPassword)
@@ -138,6 +140,7 @@ final class WorkspaceModel {
         do {
             try await session.connect()
             phase = .connected
+            await loadCurrentDatabase()
             await loadSchemas()
             await loadDatabases()
         } catch {
@@ -221,6 +224,11 @@ final class WorkspaceModel {
     }
 
     // MARK: Schema browser
+
+    private func loadCurrentDatabase() async {
+        let result = try? await runInternal("SELECT current_database()")
+        currentDatabase = result?.rows.first?.first?.textValue ?? connection.database
+    }
 
     func loadDatabases() async {
         guard !isDSQL, let result = try? await runInternal(Introspection.databases) else { return }

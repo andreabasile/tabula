@@ -8,6 +8,7 @@ struct WelcomeView: View {
     @State private var selection: UUID?
     @State private var editing: ConnectionDraft?
     @State private var importingURL = false
+    @State private var importingTablePlus = false
     @State private var pendingDeletion: ConnectionConfig?
     @State private var errorMessage: String?
 
@@ -26,6 +27,9 @@ struct WelcomeView: View {
                 if shouldConnect, let saved { open(saved) }
             }
             .environment(model)
+        }
+        .sheet(isPresented: $importingTablePlus) {
+            ImportTablePlusView().environment(model)
         }
         .sheet(isPresented: $importingURL) {
             ImportURLView { parsed in
@@ -65,6 +69,7 @@ struct WelcomeView: View {
                 WelcomeAction(title: "Crea una nuova connessione…", systemImage: "plus.circle") { editing = ConnectionDraft() }
                     .keyboardShortcut("n")
                 WelcomeAction(title: "Importa da URL…", systemImage: "link") { importingURL = true }
+                WelcomeAction(title: "Importa da TablePlus…", systemImage: "square.and.arrow.down") { importingTablePlus = true }
                 WelcomeAction(title: "Apri la selezionata", systemImage: "arrow.right.circle") {
                     selection.flatMap(model.connection).map(open)
                 }
@@ -194,7 +199,8 @@ private struct ConnectionRow: View {
 
     private var subtitle: String {
         switch connection.kind {
-        case .postgres(let settings): "\(settings.host) : \(settings.database)"
+        case .postgres(let settings):
+            "\(settings.host):\(settings.port) · \(settings.user)" + (settings.database.isEmpty ? "" : " · \(settings.database)")
         case .dsql(let settings):
             "\(settings.endpoint) : \(settings.database) · IAM \(settings.awsProfile.isEmpty ? "default" : settings.awsProfile)"
         }
