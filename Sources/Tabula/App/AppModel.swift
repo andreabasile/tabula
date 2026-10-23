@@ -6,8 +6,9 @@ import TabulaCore
 @Observable
 final class AppModel {
     private(set) var connections: [ConnectionConfig] = []
-    /// Workspace windows currently open, keyed by window target.
-    private(set) var openWorkspaces: [UUID: WorkspaceModel] = [:]
+    /// Open connections, in the order of TablePlus's left rail.
+    private(set) var workspaces: [WorkspaceModel] = []
+    var activeWorkspaceID: UUID?
     var loadError: String?
 
     let store: ConnectionStore
@@ -79,16 +80,35 @@ final class AppModel {
         }
     }
 
-    func register(_ workspace: WorkspaceModel, target: UUID) {
-        openWorkspaces[target] = workspace
+    var activeWorkspace: WorkspaceModel? {
+        workspaces.first { $0.id == activeWorkspaceID } ?? workspaces.last
     }
 
-    func unregister(target: UUID) {
-        openWorkspaces[target] = nil
+    /// Like TablePlus, the same connection can be open more than once.
+    @discardableResult
+    func openWorkspace(for connection: ConnectionConfig) -> WorkspaceModel {
+        let workspace = WorkspaceModel(connection: connection, appModel: self)
+        workspaces.append(workspace)
+        activeWorkspaceID = workspace.id
+        Task { await workspace.start() }
+        return workspace
+    }
+
+    func closeWorkspace(_ id: UUID) {
+        guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
+        let workspace = workspaces.remove(at: index)
+        if activeWorkspaceID == id {
+            activeWorkspaceID = workspaces.indices.contains(index) ? workspaces[index].id : workspaces.last?.id
+        }
+        Task { await workspace.close() }
+    }
+
+    func closeAllWorkspaces() {
+        workspaces.map(\.id).forEach(closeWorkspace)
     }
 
     func isOpen(_ connectionID: UUID) -> Bool {
-        openWorkspaces.values.contains { $0.connection.id == connectionID }
+        workspaces.contains { $0.connection.id == connectionID }
     }
 
     func savedPassword(for id: UUID) -> String? {

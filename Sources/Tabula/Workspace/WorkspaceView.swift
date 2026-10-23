@@ -1,36 +1,150 @@
 import SwiftUI
 import TabulaCore
 
-struct WorkspaceView: View {
+/// The single workspace window: TablePlus's rail of open connections on the left,
+/// the active connection's sidebar and tabs on the right.
+struct WorkspaceShell: View {
     @Environment(AppModel.self) private var appModel
-    let connection: ConnectionConfig
-    let target: WorkspaceTarget
-    @State private var model: WorkspaceModel?
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
-        Group {
-            if let model {
-                WorkspaceContent(model: model)
+        HStack(spacing: 0) {
+            ConnectionRail()
+            Rectangle().fill(Theme.border).frame(width: 1)
+            if let workspace = appModel.activeWorkspace {
+                WorkspaceContent(model: workspace)
+                    .id(workspace.id)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                Theme.surface
             }
         }
-        .background(WindowConfigurator { WorkspaceWindows.adopt($0, inNewWindow: target.inNewWindow) })
-        .task {
-            guard model == nil else { return }
-            let workspace = WorkspaceModel(connection: connection, appModel: appModel)
-            model = workspace
-            appModel.register(workspace, target: target.id)
-            await workspace.start()
-        }
-        .onDisappear {
-            appModel.unregister(target: target.id)
-            guard let model else { return }
-            Task { await model.close() }
-        }
-        // The window title becomes the native tab label; the toolbar shows the status pill instead.
-        .navigationTitle(model?.connection.name ?? connection.name)
+        .frame(minWidth: 900, maxWidth: .infinity, minHeight: 500, maxHeight: .infinity)
+        .background(WindowConfigurator(configure: WorkspaceWindows.configure))
+        .navigationTitle(appModel.activeWorkspace?.connection.name ?? "Tabula")
         .toolbar(removing: .title)
+        .onAppear(perform: showWelcomeIfEmpty)
+        .onChange(of: appModel.workspaces.isEmpty) { showWelcomeIfEmpty() }
+        // Closing the window closes every connection it holds, as TablePlus does.
+        .onDisappear { appModel.closeAllWorkspaces() }
+    }
+
+    private func showWelcomeIfEmpty() {
+        guard appModel.workspaces.isEmpty else { return }
+        dismissWindow(id: WindowID.workspace)
+        openWindow(id: WindowID.welcome)
+    }
+}
+
+/// The column of open connections: a database icon tinted by the tag, the name below.
+private struct ConnectionRail: View {
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(appModel.workspaces.enumerated()), id: \.element.id) { index, workspace in
+                        RailItem(workspace: workspace, isActive: workspace.id == appModel.activeWorkspace?.id) {
+                            appModel.activeWorkspaceID = workspace.id
+                        } onClose: {
+                            appModel.closeWorkspace(workspace.id)
+                        }
+                        .background {
+                            // ⌘1…⌘9 jump to a connection, like browser tabs.
+                            if index < 9 {
+                                Button("") { appModel.activeWorkspaceID = workspace.id }
+                                    .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
+                                    .hidden()
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            Button { appModel.activeWorkspace?.presentedSheet = .connections } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 40, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Apri un'altra connessione (⌘K)")
+            .padding(.bottom, 6)
+        }
+        .frame(width: 76)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+private struct RailItem: View {
+    let workspace: WorkspaceModel
+    let isActive: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(spacing: 5) {
+                Image(systemName: "cylinder")
+                    .font(.system(size: 21, weight: .regular))
+                    .foregroundStyle(iconColor)
+                    .overlay(alignment: .bottomTrailing) { statusBadge }
+                Text(workspace.connection.name)
+                    .font(.system(size: 10))
+                    .foregroundStyle(isActive ? .primary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity)
+            .frame(height: 76)
+            .background(isActive ? Theme.surface : (isHovering ? Theme.hover : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .topLeading) {
+            if isHovering {
+                Button(action: onClose) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(5)
+                .help("Chiudi la connessione")
+            }
+        }
+        .onHover { isHovering = $0 }
+        .help(tooltip)
+        .contextMenu {
+            Button("Riconnetti") { Task { await workspace.reconnect() } }
+            Divider()
+            Button("Chiudi", action: onClose)
+        }
+    }
+
+    private var iconColor: Color {
+        workspace.connection.tag == .local ? .green : workspace.connection.tag.color
+    }
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        switch workspace.phase {
+        case .connecting:
+            ProgressView().controlSize(.mini).offset(x: 6, y: 4)
+        case .failed:
+            Image(systemName: "exclamationmark.circle.fill").font(.system(size: 9)).foregroundStyle(.orange).offset(x: 5, y: 3)
+        default:
+            EmptyView()
+        }
+    }
+
+    private var tooltip: String {
+        let database = workspace.currentDatabase.isEmpty ? workspace.connection.database : workspace.currentDatabase
+        return "Driver: \(workspace.connection.kind.driverName)\nNome: \(workspace.connection.name)\nDatabase: \(database)"
     }
 }
 
@@ -38,10 +152,9 @@ private struct WorkspaceContent: View {
     @Bindable var model: WorkspaceModel
 
     var body: some View {
-        NavigationSplitView {
+        HSplitView {
             SidebarView(model: model)
-                .navigationSplitViewColumnWidth(min: 190, ideal: 270, max: 480)
-        } detail: {
+                .frame(minWidth: 190, idealWidth: 260, maxWidth: 480, maxHeight: .infinity)
             VStack(spacing: 0) {
                 connectionBanner
                 if !model.tabs.isEmpty { TabBar(model: model) }
@@ -61,8 +174,9 @@ private struct WorkspaceContent: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay(alignment: .top) { Divider() }
+            .layoutPriority(1)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .toolbar { WorkspaceToolbar(model: model) }
         .toolbarBackground(Theme.surface, for: .windowToolbar)
         .toolbarBackgroundVisibility(.visible, for: .windowToolbar)

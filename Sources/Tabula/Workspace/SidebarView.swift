@@ -35,7 +35,6 @@ struct SidebarView: View {
         }
         .background(Theme.surface)
         .overlay(alignment: .top) { Divider() }
-        .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
     }
 
     /// Search on top, as in TablePlus's "Search for item…".

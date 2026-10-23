@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Gives SwiftUI scenes access to their NSWindow, which is needed for native tabs.
+/// Gives SwiftUI scenes access to their NSWindow.
 struct WindowConfigurator: NSViewRepresentable {
     let configure: @MainActor (NSWindow) -> Void
 
@@ -18,20 +18,10 @@ struct WindowConfigurator: NSViewRepresentable {
 
 @MainActor
 enum WorkspaceWindows {
-    static let tabbingIdentifier = "tabula.workspace"
-
-    /// Like TablePlus: a new connection lands as a tab of the frontmost workspace window.
-    static func adopt(_ window: NSWindow, inNewWindow: Bool) {
-        window.tabbingIdentifier = tabbingIdentifier
-        window.tabbingMode = inNewWindow ? .disallowed : .preferred
+    /// Connections live in the left rail, so the window never joins a native tab group.
+    static func configure(_ window: NSWindow) {
+        window.tabbingMode = .disallowed
         window.titlebarSeparatorStyle = .line
         window.backgroundColor = Theme.surfaceNS
-        guard !inNewWindow,
-              window.tabGroup?.windows.count ?? 1 <= 1,
-              let host = NSApp.orderedWindows.first(where: { $0 !== window && $0.tabbingIdentifier == tabbingIdentifier && $0.isVisible })
-        else { return }
-        host.addTabbedWindow(window, ordered: .above)
-        window.makeKeyAndOrderFront(nil)
-        window.tabbingMode = .preferred
     }
 }

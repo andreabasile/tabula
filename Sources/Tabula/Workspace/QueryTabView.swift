@@ -40,19 +40,27 @@ struct QueryTabView: View {
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
             Spacer()
-            Picker("", selection: $query.rowLimit) {
-                ForEach(QueryLimit.choices, id: \.self) { limit in
-                    Text(limit == 0 ? "Nessun limite" : "\(limit) righe").tag(limit)
+            Menu {
+                Picker("Limite", selection: $query.rowLimit) {
+                    ForEach(QueryLimit.choices, id: \.self) { limit in
+                        Text(limitTitle(limit)).tag(limit)
+                    }
                 }
+                .pickerStyle(.inline)
+            } label: {
+                Text(limitTitle(query.rowLimit))
             }
-            .labelsHidden()
+            .menuStyle(.borderlessButton)
             .fixedSize()
             .help("Aggiunge LIMIT alle SELECT che non ce l'hanno")
+            BarDivider()
             Button("Beautify ⌘I") { query.beautify() }
                 .keyboardShortcut("i")
+            BarDivider()
             if query.isRunning {
-                Button("Annulla", role: .destructive) { query.cancel() }
+                Button("Annulla ⌘.") { query.cancel() }
                     .keyboardShortcut(".", modifiers: .command)
+                    .foregroundStyle(.red)
             } else {
                 Menu {
                     Button("Esegui tutto ⇧⌘↩") { Task { await query.runAll() } }
@@ -61,9 +69,12 @@ struct QueryTabView: View {
                 } primaryAction: {
                     Task { await query.runCurrent() }
                 }
+                .menuStyle(.borderlessButton)
                 .fixedSize()
             }
         }
+        .buttonStyle(.borderless)
+        .font(.system(size: 11))
         .controlSize(.small)
         .padding(.horizontal, 10)
         .frame(height: 30)
@@ -146,9 +157,13 @@ struct QueryTabView: View {
 
     private var resultFooter: some View {
         HStack(spacing: 4) {
-            ForEach(ResultMode.allCases, id: \.self) { mode in
-                BarTextButton(title: mode.rawValue, isOn: resultMode == mode) { resultMode = mode }
+            Picker("", selection: $resultMode) {
+                ForEach(ResultMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .fixedSize()
             if query.outcomes.count > 1 {
                 BarDivider()
                 Picker("", selection: $query.selectedOutcomeID) {
@@ -189,6 +204,10 @@ struct QueryTabView: View {
         .frame(height: 28)
         .background(Theme.surface)
         .overlay(alignment: .top) { Divider() }
+    }
+
+    private func limitTitle(_ limit: Int) -> String {
+        limit == 0 ? "Nessun limite" : "Limite \(limit)"
     }
 
     private func rowCountText(_ outcome: StatementOutcome) -> String {

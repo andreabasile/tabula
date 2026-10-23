@@ -46,7 +46,8 @@ enum ConnectionPhase: Equatable {
 
 @MainActor
 @Observable
-final class WorkspaceModel {
+final class WorkspaceModel: Identifiable {
+    let id = UUID()
     private(set) var connection: ConnectionConfig
     private(set) var phase: ConnectionPhase = .connecting
     private(set) var status = ConnectionStatus()

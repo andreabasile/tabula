@@ -33,9 +33,10 @@ struct DataGrid: NSViewRepresentable {
         tableView.allowsColumnResizing = true
         tableView.columnAutoresizingStyle = .noColumnAutoresizing
         tableView.gridStyleMask = [.solidVerticalGridLineMask, .solidHorizontalGridLineMask]
-        tableView.gridColor = NSColor.separatorColor.withAlphaComponent(0.35)
+        // TablePlus's grid: compact rows and hairlines that barely show.
+        tableView.gridColor = NSColor.separatorColor.withAlphaComponent(0.12)
         tableView.intercellSpacing = NSSize(width: 0, height: 0)
-        tableView.rowHeight = 24
+        tableView.rowHeight = 20
         tableView.dataSource = context.coordinator
         tableView.delegate = context.coordinator
         tableView.menu = context.coordinator.makeMenu()
@@ -89,8 +90,8 @@ struct DataGrid: NSViewRepresentable {
                 let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(String(index)))
                 tableColumn.title = column.name
                 tableColumn.headerToolTip = column.typeName
-                tableColumn.headerCell.alignment = .center
-                tableColumn.headerCell.font = .systemFont(ofSize: 12, weight: .medium)
+                tableColumn.headerCell.alignment = .left
+                tableColumn.headerCell.font = .systemFont(ofSize: 12)
                 tableColumn.width = contentWidth(for: index, column: column)
                 tableColumn.minWidth = 40
                 if parent.source.onSort != nil {
@@ -287,8 +288,8 @@ final class GridCell: NSTableCellView {
         addSubview(field)
         textField = field
         NSLayoutConstraint.activate([
-            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
+            field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
             field.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
         wantsLayer = true

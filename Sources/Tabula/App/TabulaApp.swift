@@ -21,27 +21,15 @@ struct TabulaApp: App {
         .windowResizability(.contentSize)
         .defaultSize(width: 760, height: 460)
 
-        WindowGroup("Workspace", id: WindowID.workspace, for: WorkspaceTarget.self) { $target in
-            if let target, let connection = model.connection(target.connectionID) {
-                WorkspaceView(connection: connection, target: target)
-                    .environment(model)
-            } else {
-                MissingConnectionView()
-            }
+        // One window for every open connection, switched from the left rail as in TablePlus.
+        Window("Tabula", id: WindowID.workspace) {
+            WorkspaceShell()
+                .environment(model)
         }
         .defaultSize(width: 1280, height: 800)
-        // Sessions cannot survive a relaunch, so restored windows would only be empty shells.
+        // Sessions cannot survive a relaunch, so a restored window would only be an empty shell.
         .restorationBehavior(.disabled)
         .commands { WorkspaceCommands() }
-    }
-}
-
-/// A workspace whose connection was deleted closes itself instead of lingering empty.
-private struct MissingConnectionView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        Color.clear.onAppear { dismiss() }
     }
 }
 

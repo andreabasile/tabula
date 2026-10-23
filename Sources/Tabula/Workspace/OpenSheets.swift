@@ -22,14 +22,12 @@ struct OpenConnectionSheet: View {
             search: $search,
             primaryTitle: "Apri",
             canConfirm: selection != nil,
-            onConfirm: { open(inNewWindow: false) },
+            onConfirm: open,
             extraButtons: {
                 Button("Nuova…") {
                     dismiss()
                     openWindow(id: WindowID.welcome)
                 }
-                Button("In una nuova finestra") { open(inNewWindow: true) }
-                    .disabled(selection == nil)
             }
         ) {
             List(selection: $selection) {
@@ -52,7 +50,7 @@ struct OpenConnectionSheet: View {
                     .tag(connection.id)
                 }
             }
-            .contextMenu(forSelectionType: UUID.self) { _ in } primaryAction: { _ in open(inNewWindow: false) }
+            .contextMenu(forSelectionType: UUID.self) { _ in } primaryAction: { _ in open() }
         }
         .onAppear { selection = filtered.first?.id }
     }
@@ -63,10 +61,10 @@ struct OpenConnectionSheet: View {
         }
     }
 
-    private func open(inNewWindow: Bool) {
-        guard let selection else { return }
+    private func open() {
+        guard let selection, let connection = appModel.connection(selection) else { return }
         dismiss()
-        openWindow(id: WindowID.workspace, value: WorkspaceTarget(connectionID: selection, inNewWindow: inNewWindow))
+        appModel.openWorkspace(for: connection)
     }
 }
 

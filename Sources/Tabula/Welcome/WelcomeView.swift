@@ -138,7 +138,8 @@ struct WelcomeView: View {
     }
 
     private func open(_ connection: ConnectionConfig) {
-        openWindow(id: WindowID.workspace, value: WorkspaceTarget(connectionID: connection.id))
+        model.openWorkspace(for: connection)
+        openWindow(id: WindowID.workspace)
     }
 
     /// `Tabula --connect "<name>" [--connect "<other>"]` opens saved connections straight away.

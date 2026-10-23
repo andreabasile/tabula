@@ -52,9 +52,13 @@ struct TableTabView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 4) {
-            ForEach(TableTabMode.allCases, id: \.self) { mode in
-                BarTextButton(title: mode.rawValue, isOn: table.mode == mode) { table.mode = mode }
+            Picker("", selection: $table.mode) {
+                ForEach(TableTabMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .fixedSize()
             if table.mode == .data {
                 BarDivider()
                 BarTextButton(title: "+ Riga", isOn: false) { table.addRow() }
@@ -117,11 +121,11 @@ struct BarTextButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 11, weight: isOn ? .semibold : .regular))
+                .font(.system(size: 11))
                 .foregroundStyle(isEnabled ? (isOn ? Color.accentColor : .primary) : Color.secondary.opacity(0.5))
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 6)
                 .padding(.vertical, 3)
-                .background(isOn ? Theme.selection : .clear, in: RoundedRectangle(cornerRadius: 4))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
