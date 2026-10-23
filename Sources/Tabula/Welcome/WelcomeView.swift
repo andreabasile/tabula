@@ -18,6 +18,7 @@ struct WelcomeView: View {
             connectionList
         }
         .frame(width: 760, height: 460)
+        .background(Theme.surface)
         .onAppear(perform: openConnectionFromLaunchArguments)
         .sheet(item: $editing) { draft in
             ConnectionFormView(draft: draft) { saved, shouldConnect in
@@ -73,7 +74,7 @@ struct WelcomeView: View {
             .padding(.bottom, 18)
         }
         .frame(width: 270)
-        .background(.background.secondary)
+        .background(Theme.surface)
     }
 
     private static var version: String {
@@ -99,6 +100,7 @@ struct WelcomeView: View {
             .contextMenu(forSelectionType: UUID.self) { _ in } primaryAction: { ids in
                 ids.first.flatMap(model.connection).map(open)
             }
+            .scrollContentBackground(.hidden)
             .overlay {
                 if model.connections.isEmpty {
                     ContentUnavailableView("Nessuna connessione", systemImage: "externaldrive", description: Text("Crea la prima con ⌘N"))
@@ -160,7 +162,7 @@ private struct WelcomeAction: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .background(isHovering ? Color.primary.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                .background(isHovering ? Theme.selection : .clear, in: RoundedRectangle(cornerRadius: 5))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

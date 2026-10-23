@@ -101,7 +101,7 @@ struct TableTabView: View {
         .font(.system(size: 11))
         .padding(.horizontal, 8)
         .frame(height: 28)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Theme.surface)
         .overlay(alignment: .top) { Divider() }
     }
 }
@@ -117,10 +117,10 @@ struct BarTextButton: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 11, weight: isOn ? .semibold : .regular))
-                .foregroundStyle(isEnabled ? (isOn ? .primary : .secondary) : .tertiary)
+                .foregroundStyle(isEnabled ? (isOn ? Color.accentColor : .primary) : Color.secondary.opacity(0.5))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(isOn ? Color.primary.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 4))
+                .background(isOn ? Theme.selection : .clear, in: RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
     }
@@ -154,7 +154,8 @@ private struct FilterBar: View {
             .controlSize(.small)
         }
         .padding(8)
-        .background(.background.secondary)
+        .background(Theme.surface)
+        .overlay(alignment: .bottom) { Divider() }
         .onAppear {
             if table.filters.isEmpty { table.filters = [ColumnFilter(column: nil, op: .contains, value: "")] }
         }

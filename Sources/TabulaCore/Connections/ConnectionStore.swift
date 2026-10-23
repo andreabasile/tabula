@@ -16,7 +16,11 @@ public final class ConnectionStore: @unchecked Sendable {
         self.secrets = secrets
     }
 
+    /// TABULA_CONNECTIONS_FILE points the app at another file, e.g. for UI checks.
     public static func defaultFileURL() -> URL {
+        if let override = ProcessInfo.processInfo.environment["TABULA_CONNECTIONS_FILE"] {
+            return URL(fileURLWithPath: override)
+        }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return support.appendingPathComponent("Tabula", isDirectory: true).appendingPathComponent("connections.json")
     }

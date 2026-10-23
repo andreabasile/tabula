@@ -47,7 +47,7 @@ struct QueryTabView: View {
         .font(.system(size: 11))
         .padding(.horizontal, 8)
         .frame(height: 28)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Theme.surface)
         .overlay(alignment: .top) { Divider() }
         .overlay(alignment: .bottom) { Divider() }
     }

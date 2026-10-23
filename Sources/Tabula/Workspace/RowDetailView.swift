@@ -32,7 +32,8 @@ struct RowDetailView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(.background)
+        .background(Theme.surface)
+        .overlay(alignment: .leading) { Divider() }
     }
 
     private var selectedRow: Int? {

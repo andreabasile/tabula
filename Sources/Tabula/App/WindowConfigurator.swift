@@ -25,6 +25,7 @@ enum WorkspaceWindows {
         window.tabbingIdentifier = tabbingIdentifier
         window.tabbingMode = inNewWindow ? .disallowed : .preferred
         window.titlebarSeparatorStyle = .line
+        window.backgroundColor = Theme.surfaceNS
         guard !inNewWindow,
               window.tabGroup?.windows.count ?? 1 <= 1,
               let host = NSApp.orderedWindows.first(where: { $0 !== window && $0.tabbingIdentifier == tabbingIdentifier && $0.isVisible })

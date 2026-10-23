@@ -15,6 +15,7 @@ struct SidebarView: View {
                 section("Viste", kinds: [.view, .materializedView])
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
             .environment(\.defaultMinListRowHeight, 22)
             .overlay {
                 if model.phase == .connected, model.tables.isEmpty {
@@ -45,6 +46,7 @@ struct SidebarView: View {
             .padding(.horizontal, 10)
             .frame(height: 30)
         }
+        .background(Theme.surface)
     }
 
     @ViewBuilder
@@ -129,7 +131,7 @@ struct TabBar: View {
             .help("Nuova query (⌘T)")
         }
         .frame(height: 28)
-        .background(Color.primary.opacity(0.05))
+        .background(Theme.surface)
         .overlay(alignment: .bottom) { Divider() }
     }
 }
@@ -147,7 +149,8 @@ private struct TabButton: View {
                 Image(systemName: isQuery ? "chevron.left.forwardslash.chevron.right" : "tablecells")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
-                Text(tab.title).font(.system(size: 12)).lineLimit(1)
+                Text(tab.title).font(.system(size: 12, weight: isSelected ? .medium : .regular)).lineLimit(1)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
                 if hasPendingChanges { Circle().fill(.orange).frame(width: 6, height: 6) }
             }
             .padding(.horizontal, 26)
@@ -161,7 +164,8 @@ private struct TabButton: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(isSelected ? Color(nsColor: .controlBackgroundColor) : (isHovering ? Color.primary.opacity(0.04) : .clear))
+        .background(isSelected ? Theme.surface : (isHovering ? Theme.hover : .clear))
+        .overlay(alignment: .bottom) { if isSelected { Rectangle().fill(Color.accentColor).frame(height: 2) } }
         .overlay(alignment: .trailing) { Rectangle().fill(.separator).frame(width: 1) }
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)

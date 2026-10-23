@@ -63,6 +63,8 @@ private struct WorkspaceContent: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .toolbar { WorkspaceToolbar(model: model) }
+        .toolbarBackground(Theme.surface, for: .windowToolbar)
+        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         .focusedSceneValue(\.workspace, model)
         .sheet(item: $model.pendingConfirmation) { confirmation in
             ConfirmationSheet(confirmation: confirmation, connection: model.connection)
@@ -120,7 +122,7 @@ private struct EmptyWorkspaceView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(Theme.surface)
     }
 }
 
@@ -165,7 +167,7 @@ private struct ConfirmationSheet: View {
             }
             .frame(width: 520, height: 180)
             .padding(8)
-            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 6))
+            .background(Theme.hover, in: RoundedRectangle(cornerRadius: 6))
             HStack {
                 Spacer()
                 Button("Annulla") { confirmation.resume(false) }.keyboardShortcut(.cancelAction)
