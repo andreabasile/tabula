@@ -15,7 +15,10 @@ final class AppModel {
 
     init(store: ConnectionStore = ConnectionStore(fileURL: ConnectionStore.defaultFileURL(), secrets: KeychainSecretStore())) {
         self.store = store
-        self.sessionFactory = SessionFactory(tokens: CachedTokenProvider(generator: AWSCLITokenGenerator()))
+        self.sessionFactory = SessionFactory(
+            tokens: CachedTokenProvider(generator: AWSCLITokenGenerator()),
+            tunnels: TunnelManager(launcher: SystemScriptLauncher(), probe: TCPPortProbe())
+        )
         reload()
         importFromLaunchEnvironment()
     }

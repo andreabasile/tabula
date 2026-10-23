@@ -34,6 +34,20 @@ Con `TABULA_SNAPSHOT_DIR=<cartella>` l'app salva ogni 3 secondi un PNG delle sue
 - La barra di stato mostra la validità del token, da quanto è aperta la connessione
   e quante riconnessioni ci sono state; "Riconnetti" (⇧⌘R) forza token e connessione nuovi.
 
+## Script prima della connessione (tunnel)
+
+Ogni connessione può avere uno script, salvato con lei, che Tabula lancia in una shell di
+login zsh prima di collegarsi, ad esempio `bash ~/scripts/db-tunnel-prod.sh` per un tunnel SSM.
+
+- "Apre un tunnel" (predefinito): lo script può restare attivo; Tabula lo lancia solo se
+  host:porta non risponde già, attende che risponda (30 s di default), lo rilancia quando il
+  tunnel cade e la connessione va ricreata, e chiude l'intero albero dei processi con l'ultima
+  finestra che lo usa o all'uscita dall'app. Connessioni sulla stessa porta condividono il tunnel.
+- Altrimenti lo script deve terminare con successo a ogni connessione (es. `aws sso login`).
+
+Se fallisce, l'errore mostra le ultime righe del suo output. L'import da TablePlus porta con sé
+il loro `StartupBashScript`.
+
 ## Import da TablePlus
 
 "Importa da TablePlus…" nella finestra di benvenuto legge il file di File › Export Connections

@@ -22,6 +22,7 @@ struct ConnectionDraft: Identifiable {
     var password = ""
     var dsql = DSQLSettings()
     var dsqlUsesAdmin = true
+    var script = PreConnectScript(script: "")
 
     init() {
         id = UUID()
@@ -35,6 +36,7 @@ struct ConnectionDraft: Identifiable {
         tag = connection.tag
         group = connection.group
         safeMode = connection.safeMode
+        script = connection.preConnectScript ?? PreConnectScript(script: "")
         switch connection.kind {
         case .postgres(let settings):
             driver = .postgres
@@ -77,7 +79,8 @@ struct ConnectionDraft: Identifiable {
             tag: tag,
             group: group.trimmingCharacters(in: .whitespaces),
             kind: kind,
-            safeMode: safeMode
+            safeMode: safeMode,
+            preConnectScript: script.isEmpty ? nil : script
         )
     }
 

@@ -79,12 +79,14 @@ public enum TablePlusImporter {
             ))
             password = storage == .keychain ? nonEmpty(item["DatabasePassword"]) : nil
         }
+        let startupScript = string(item["StartupBashScript"])
         let connection = ConnectionConfig(
             name: name,
             tag: ConnectionTag(rawValue: string(item["Enviroment"]).lowercased()) ?? .local,
             group: group,
             kind: kind,
-            safeMode: safeMode(item["SafeModeLevel"])
+            safeMode: safeMode(item["SafeModeLevel"]),
+            preConnectScript: startupScript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : PreConnectScript(script: startupScript)
         )
         imported.append(ImportedConnection(connection: connection, password: password, warnings: warnings))
     }

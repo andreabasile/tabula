@@ -23,6 +23,7 @@ struct ConnectionFormView: View {
                 case .postgres: postgresSection
                 case .dsql: dsqlSection
                 }
+                scriptSection
                 Section("Sicurezza") {
                     Picker("Modalità", selection: $draft.safeMode) {
                         ForEach(SafeMode.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -114,6 +115,43 @@ struct ConnectionFormView: View {
         }
     }
 
+    private var scriptSection: some View {
+        Section {
+            TextEditor(text: $draft.script.script)
+                .font(.system(size: 12, design: .monospaced))
+                .frame(height: 84)
+                .scrollContentBackground(.hidden)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 5))
+                .overlay(alignment: .topLeading) {
+                    if draft.script.script.isEmpty {
+                        Text("es. bash ~/scripts/db-tunnel-prod.sh")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 1)
+                            .padding(.leading, 5)
+                            .allowsHitTesting(false)
+                    }
+                }
+            Toggle("Apre un tunnel: attendi che \(endpointLabel) risponda", isOn: $draft.script.waitsForPort)
+            Stepper("Attesa massima: \(draft.script.timeoutSeconds) s", value: $draft.script.timeoutSeconds, in: 5...300, step: 5)
+        } header: {
+            Text("Prima della connessione")
+        } footer: {
+            Text(draft.script.waitsForPort
+                ? "Lo script gira in una shell di login (zsh) e può restare attivo: Tabula lo lancia solo se la porta non risponde già, lo rilancia se il tunnel cade e lo chiude con l'ultima finestra che lo usa."
+                : "Lo script gira in una shell di login (zsh) a ogni connessione e deve terminare con successo prima che Tabula si colleghi.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var endpointLabel: String {
+        switch draft.driver {
+        case .postgres: "\(draft.postgres.host.isEmpty ? "host" : draft.postgres.host):\(draft.portText)"
+        case .dsql: "l'endpoint"
+        }
+    }
+
     private var footer: some View {
         HStack {
             testStatus
@@ -145,7 +183,8 @@ struct ConnectionFormView: View {
         testState = .running
         let connection = draft.makeConnection()
         let password = draft.password
-        let session = model.sessionFactory.makeSession(for: connection) { password.isEmpty ? nil : password }
+        let owner = UUID()
+        let session = model.sessionFactory.makeSession(for: connection, owner: owner) { password.isEmpty ? nil : password }
         do {
             let result = try await session.execute("SELECT current_user, version()")
             let user = result.rows.first?.first?.displayText ?? "?"
@@ -154,6 +193,7 @@ struct ConnectionFormView: View {
             testState = .failed(error.localizedDescription)
         }
         await session.close()
+        await model.sessionFactory.tunnels.release(owner: owner)
     }
 
     private func save(connect: Bool) {

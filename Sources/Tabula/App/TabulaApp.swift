@@ -5,7 +5,13 @@ import TabulaCore
 @main
 struct TabulaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = AppModel()
+    @State private var model: AppModel
+
+    init() {
+        let model = AppModel()
+        AppDelegate.tunnels = model.sessionFactory.tunnels
+        _model = State(initialValue: model)
+    }
 
     var body: some Scene {
         Window("Benvenuto in Tabula", id: WindowID.welcome) {
@@ -53,4 +59,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Tunnels started by Tabula must not outlive it.
+    func applicationWillTerminate(_ notification: Notification) {
+        guard let tunnels = Self.tunnels else { return }
+        let semaphore = DispatchSemaphore(value: 0)
+        Task.detached {
+            await tunnels.releaseAll()
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 2)
+    }
+
+    nonisolated(unsafe) static var tunnels: TunnelManager?
 }

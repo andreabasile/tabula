@@ -84,6 +84,15 @@ private struct WorkspaceContent: View {
 
     @ViewBuilder
     private var connectionBanner: some View {
+        if model.phase == .connecting, model.hasPreConnectScript {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Eseguo lo script prima della connessione e attendo il tunnel…").font(.callout)
+                Spacer()
+            }
+            .padding(8)
+            .background(Theme.selection)
+        }
         if case .failed(let message) = model.phase {
             HStack(alignment: .top) {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)

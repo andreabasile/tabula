@@ -72,6 +72,8 @@ final class WorkspaceModel {
     private let sessionFactory: SessionFactory
     private let storedPassword: String?
     private let passwordBox = PasswordBox()
+    /// Holds this window's share of any tunnel opened by the pre-connect script.
+    private let tunnelOwner = UUID()
     private var queryCounter = 0
 
     init(connection: ConnectionConfig, appModel: AppModel) {
@@ -79,7 +81,7 @@ final class WorkspaceModel {
         self.safeMode = connection.safeMode
         self.sessionFactory = appModel.sessionFactory
         self.storedPassword = appModel.savedPassword(for: connection.id)
-        self.session = Self.makeSession(connection, factory: appModel.sessionFactory, passwordBox: passwordBox, storedPassword: storedPassword)
+        self.session = Self.makeSession(connection, factory: appModel.sessionFactory, owner: tunnelOwner, passwordBox: passwordBox, storedPassword: storedPassword)
         if case .postgres(let settings) = connection.kind, settings.passwordStorage == .askEveryTime {
             phase = .needsPassword
         }
@@ -88,10 +90,11 @@ final class WorkspaceModel {
     private static func makeSession(
         _ connection: ConnectionConfig,
         factory: SessionFactory,
+        owner: UUID,
         passwordBox: PasswordBox,
         storedPassword: String?
     ) -> ManagedSession {
-        factory.makeSession(for: connection) { await passwordBox.value ?? storedPassword }
+        factory.makeSession(for: connection, owner: owner) { await passwordBox.value ?? storedPassword }
     }
 
     var selectedTab: WorkspaceTab? { tabs.first { $0.id == selectedTabID } }
@@ -120,7 +123,7 @@ final class WorkspaceModel {
         guard database != currentDatabase else { return }
         await session.close()
         connection = connection.switchingDatabase(to: database)
-        session = Self.makeSession(connection, factory: sessionFactory, passwordBox: passwordBox, storedPassword: storedPassword)
+        session = Self.makeSession(connection, factory: sessionFactory, owner: tunnelOwner, passwordBox: passwordBox, storedPassword: storedPassword)
         tabs = []
         selectedTabID = nil
         tables = []
@@ -160,7 +163,10 @@ final class WorkspaceModel {
 
     func close() async {
         await session.close()
+        await sessionFactory.tunnels.release(owner: tunnelOwner)
     }
+
+    var hasPreConnectScript: Bool { !(connection.preConnectScript?.isEmpty ?? true) }
 
     func disconnect() async {
         await session.close()

@@ -98,6 +98,8 @@ public struct ConnectionConfig: Codable, Equatable, Identifiable, Sendable {
     public var group: String
     public var kind: ConnectionKind
     public var safeMode: SafeMode
+    /// Optional; absent in files saved before the feature existed.
+    public var preConnectScript: PreConnectScript?
 
     public init(
         id: UUID = UUID(),
@@ -105,7 +107,8 @@ public struct ConnectionConfig: Codable, Equatable, Identifiable, Sendable {
         tag: ConnectionTag = .local,
         group: String = "",
         kind: ConnectionKind,
-        safeMode: SafeMode = .silent
+        safeMode: SafeMode = .silent,
+        preConnectScript: PreConnectScript? = nil
     ) {
         self.id = id
         self.name = name
@@ -113,6 +116,7 @@ public struct ConnectionConfig: Codable, Equatable, Identifiable, Sendable {
         self.group = group
         self.kind = kind
         self.safeMode = safeMode
+        self.preConnectScript = preConnectScript
     }
 
     public var host: String {
