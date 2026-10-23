@@ -47,24 +47,37 @@ struct WelcomeView: View {
     }
 
     private var leftPanel: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 0) {
             Spacer()
-            Image(systemName: "tablecells.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(.tint)
-            Text("Tabula").font(.title.bold())
-            Text("PostgreSQL e Aurora DSQL").font(.callout).foregroundStyle(.secondary)
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 112, height: 112)
+            Text("Benvenuto in Tabula")
+                .font(.system(size: 20, weight: .semibold))
+                .padding(.top, 10)
+            Text("Versione \(Self.version)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
             Spacer()
-            VStack(spacing: 8) {
-                Button("Crea una nuova connessione…") { editing = ConnectionDraft() }
+            VStack(alignment: .leading, spacing: 2) {
+                WelcomeAction(title: "Crea una nuova connessione…", systemImage: "plus.circle") { editing = ConnectionDraft() }
                     .keyboardShortcut("n")
-                Button("Importa da URL…") { importingURL = true }
+                WelcomeAction(title: "Importa da URL…", systemImage: "link") { importingURL = true }
+                WelcomeAction(title: "Apri la selezionata", systemImage: "arrow.right.circle") {
+                    selection.flatMap(model.connection).map(open)
+                }
+                .disabled(selection == nil)
             }
-            .buttonStyle(.link)
-            .padding(.bottom, 24)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 18)
         }
-        .frame(width: 240)
+        .frame(width: 270)
         .background(.background.secondary)
+    }
+
+    private static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "sviluppo"
     }
 
     private var connectionList: some View {
@@ -76,7 +89,7 @@ struct WelcomeView: View {
                 ForEach(groups, id: \.name) { group in
                     Section(group.name.isEmpty ? "Connessioni" : group.name) {
                         ForEach(group.connections) { connection in
-                            ConnectionRow(connection: connection)
+                            ConnectionRow(connection: connection, isOpen: model.isOpen(connection.id))
                                 .tag(connection.id)
                                 .contextMenu { contextMenu(for: connection) }
                         }
@@ -118,15 +131,16 @@ struct WelcomeView: View {
     }
 
     private func open(_ connection: ConnectionConfig) {
-        openWindow(id: WindowID.workspace, value: connection.id)
+        openWindow(id: WindowID.workspace, value: WorkspaceTarget(connectionID: connection.id))
     }
 
-    /// `Tabula --connect "<name>"` opens a saved connection straight away.
+    /// `Tabula --connect "<name>" [--connect "<other>"]` opens saved connections straight away.
     private func openConnectionFromLaunchArguments() {
         let arguments = CommandLine.arguments
-        guard let flag = arguments.firstIndex(of: "--connect"), arguments.indices.contains(flag + 1) else { return }
-        let name = arguments[flag + 1]
-        model.connections.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }.map(open)
+        let names = arguments.indices.dropLast().filter { arguments[$0] == "--connect" }.map { arguments[$0 + 1] }
+        for name in names {
+            model.connections.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }.map(open)
+        }
     }
 
     private func perform(_ action: () throws -> Void) {
@@ -134,8 +148,29 @@ struct WelcomeView: View {
     }
 }
 
+private struct WelcomeAction: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(isHovering ? Color.primary.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+    }
+}
+
 private struct ConnectionRow: View {
     let connection: ConnectionConfig
+    let isOpen: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -146,6 +181,10 @@ private struct ConnectionRow: View {
                     TagBadge(tag: connection.tag)
                 }
                 Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            if isOpen {
+                Circle().fill(.green).frame(width: 7, height: 7).help("Connessione aperta")
             }
         }
         .padding(.vertical, 3)

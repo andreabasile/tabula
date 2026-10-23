@@ -129,6 +129,20 @@ public struct ConnectionConfig: Codable, Equatable, Identifiable, Sendable {
         }
     }
 
+    /// The same connection pointed at another database, as TablePlus's "Open database".
+    public func switchingDatabase(to database: String) -> ConnectionConfig {
+        var copy = self
+        switch kind {
+        case .postgres(var settings):
+            settings.database = database
+            copy.kind = .postgres(settings)
+        case .dsql(var settings):
+            settings.database = database
+            copy.kind = .dsql(settings)
+        }
+        return copy
+    }
+
     public var user: String {
         switch kind {
         case .postgres(let settings): settings.user

@@ -20,7 +20,7 @@ swift run Tabula                 # avvio in sviluppo
 ./scripts/build-app.sh --install # copia in /Applications e apre
 ```
 
-Avvio diretto su una connessione salvata: `Tabula --connect "<nome>" [--table <tabella>]`.
+Avvio diretto su connessioni salvate: `Tabula --connect "<nome>" [--connect "<altra>"] [--table <tabella>]`.
 Con `TABULA_SNAPSHOT_DIR=<cartella>` l'app salva ogni 3 secondi un PNG delle sue finestre
 (serve a verificare l'interfaccia senza permessi di registrazione schermo).
 
@@ -34,7 +34,15 @@ Con `TABULA_SNAPSHOT_DIR=<cartella>` l'app salva ogni 3 secondi un PNG delle sue
 - La barra di stato mostra la validità del token, da quanto è aperta la connessione
   e quante riconnessioni ci sono state; "Riconnetti" (⇧⌘R) forza token e connessione nuovi.
 
+## Più connessioni
+
+Ogni connessione si apre in una tab nativa della finestra (come "Open in new Tab" di TablePlus);
+⌘K apre il selettore anche dentro il workspace, con "In una nuova finestra" per staccarla.
+Per PostgreSQL ⌘D cambia database sullo stesso server. Il riquadro al centro della barra è
+colorato secondo il tag; cliccandolo si vedono host, utente, token e i pulsanti Riconnetti/Disconnetti.
+
 ## Scorciatoie
 
-⌘T nuova query · ⌘↩ esegui statement corrente o selezione · ⇧⌘↩ esegui tutto ·
-⌘S salva modifiche · ⌘F filtri · ⌘R aggiorna · ⇧⌘C console · ⌘] dettaglio riga · ⌘K connessioni
+⌘K apri connessione · ⌘D apri database · ⇧⌘0 gestisci connessioni · ⌘T nuova query ·
+⌘↩ esegui statement corrente o selezione · ⇧⌘↩ esegui tutto · ⌘S salva modifiche · ⌘F filtri ·
+⌘P cerca tabella · ⌘R aggiorna · ⇧⌘R riconnetti · ⇧⌘C console · ⌘] dettaglio riga

@@ -19,8 +19,15 @@ struct WorkspaceCommands: Commands {
             }
             .keyboardShortcut("w", modifiers: [.command, .shift])
             .disabled(workspace?.selectedTabID == nil)
-            Button("Apri connessione…") { openWindow(id: WindowID.welcome) }
-                .keyboardShortcut("k")
+            Button("Apri connessione…") {
+                if let workspace { workspace.presentedSheet = .connections } else { openWindow(id: WindowID.welcome) }
+            }
+            .keyboardShortcut("k")
+            Button("Apri database…") { workspace?.presentedSheet = .databases }
+                .keyboardShortcut("d")
+                .disabled(workspace == nil || workspace?.isDSQL == true)
+            Button("Gestisci connessioni") { openWindow(id: WindowID.welcome) }
+                .keyboardShortcut("0", modifiers: [.command, .shift])
         }
         CommandMenu("Connessione") {
             Group {
@@ -29,6 +36,8 @@ struct WorkspaceCommands: Commands {
             Button("Riconnetti (nuovo token)") { Task { await workspace?.reconnect() } }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
             Divider()
+            Button("Cerca tabella") { workspace?.tableSearchFocusRequest += 1 }
+                .keyboardShortcut("p")
             Button("Filtri") {
                 if case .table(let table) = workspace?.selectedTab { table.showsFilters.toggle() }
             }

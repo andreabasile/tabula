@@ -38,18 +38,18 @@ struct QueryTabView: View {
                 .labelsHidden()
                 .frame(maxWidth: 260)
             }
-            Picker("", selection: $resultMode) {
-                ForEach(ResultMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            ForEach(ResultMode.allCases, id: \.self) { mode in
+                BarTextButton(title: mode.rawValue, isOn: resultMode == mode) { resultMode = mode }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
         }
         .controlSize(.small)
         .buttonStyle(.borderless)
-        .padding(.horizontal, 10)
-        .frame(height: 30)
-        .background(.bar)
+        .font(.system(size: 11))
+        .padding(.horizontal, 8)
+        .frame(height: 28)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .top) { Divider() }
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     @ViewBuilder

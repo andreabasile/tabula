@@ -58,6 +58,12 @@ public enum Introspection {
         ORDER BY schema_name
         """
 
+    public static let databases = """
+        SELECT datname FROM pg_database
+        WHERE NOT datistemplate AND datallowconn
+        ORDER BY datname
+        """
+
     public static func tables(schema: String) -> String {
         """
         SELECT table_name, table_type FROM information_schema.tables

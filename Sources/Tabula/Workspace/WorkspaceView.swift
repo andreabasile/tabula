@@ -4,6 +4,7 @@ import TabulaCore
 struct WorkspaceView: View {
     @Environment(AppModel.self) private var appModel
     let connection: ConnectionConfig
+    let target: WorkspaceTarget
     @State private var model: WorkspaceModel?
 
     var body: some View {
@@ -11,21 +12,25 @@ struct WorkspaceView: View {
             if let model {
                 WorkspaceContent(model: model)
             } else {
-                ProgressView()
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .background(WindowConfigurator { WorkspaceWindows.adopt($0, inNewWindow: target.inNewWindow) })
         .task {
             guard model == nil else { return }
             let workspace = WorkspaceModel(connection: connection, appModel: appModel)
             model = workspace
+            appModel.register(workspace, target: target.id)
             await workspace.start()
         }
         .onDisappear {
+            appModel.unregister(target: target.id)
             guard let model else { return }
             Task { await model.close() }
         }
-        .navigationTitle(connection.name)
-        .navigationSubtitle("\(connection.kind.driverName) · \(connection.database)")
+        // The window title becomes the native tab label; the toolbar shows the status pill instead.
+        .navigationTitle(model?.connection.name ?? connection.name)
+        .toolbar(removing: .title)
     }
 }
 
@@ -35,12 +40,11 @@ private struct WorkspaceContent: View {
     var body: some View {
         NavigationSplitView {
             SidebarView(model: model)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 400)
+                .navigationSplitViewColumnWidth(min: 190, ideal: 230, max: 400)
         } detail: {
             VStack(spacing: 0) {
                 connectionBanner
-                TabBar(model: model)
-                Divider()
+                if !model.tabs.isEmpty { TabBar(model: model) }
                 HSplitView {
                     VSplitView {
                         tabContent.frame(maxWidth: .infinity, minHeight: 200, maxHeight: .infinity)
@@ -55,15 +59,19 @@ private struct WorkspaceContent: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                Divider()
-                StatusBarView(model: model)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .toolbar { toolbar }
+        .toolbar { WorkspaceToolbar(model: model) }
         .focusedSceneValue(\.workspace, model)
         .sheet(item: $model.pendingConfirmation) { confirmation in
             ConfirmationSheet(confirmation: confirmation, connection: model.connection)
+        }
+        .sheet(item: $model.presentedSheet) { sheet in
+            switch sheet {
+            case .connections: OpenConnectionSheet(workspace: model)
+            case .databases: OpenDatabaseSheet(model: model)
+            }
         }
         .sheet(isPresented: Binding(get: { model.phase == .needsPassword }, set: { _ in })) {
             PasswordPrompt(connection: model.connection) { password in
@@ -74,16 +82,7 @@ private struct WorkspaceContent: View {
 
     @ViewBuilder
     private var connectionBanner: some View {
-        switch model.phase {
-        case .connecting:
-            HStack {
-                ProgressView().controlSize(.small)
-                Text(model.isDSQL ? "Genero il token IAM e mi connetto…" : "Connessione in corso…")
-                Spacer()
-            }
-            .padding(8)
-            .background(.bar)
-        case .failed(let message):
+        if case .failed(let message) = model.phase {
             HStack(alignment: .top) {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 Text(message).textSelection(.enabled).font(.callout)
@@ -92,8 +91,6 @@ private struct WorkspaceContent: View {
             }
             .padding(10)
             .background(.orange.opacity(0.12))
-        case .connected, .needsPassword:
-            EmptyView()
         }
     }
 
@@ -102,64 +99,48 @@ private struct WorkspaceContent: View {
         switch model.selectedTab {
         case .table(let table): TableTabView(table: table)
         case .query(let query): QueryTabView(query: query)
-        case nil:
-            ContentUnavailableView {
-                Label("Nessuna tabella aperta", systemImage: "tablecells")
-            } description: {
-                Text("Scegli una tabella a sinistra o apri un editor SQL con ⌘T")
-            } actions: {
-                Button("Nuova query") { model.newQueryTab() }
-            }
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            ConnectionChip(connection: model.connection, phase: model.phase)
-        }
-        ToolbarItemGroup {
-            Button { Task { await model.refreshAll() } } label: { Label("Aggiorna", systemImage: "arrow.clockwise") }
-                .help("Aggiorna (⌘R)")
-            Button { model.newQueryTab() } label: { Label("SQL", systemImage: "terminal") }
-                .help("Nuovo editor SQL (⌘T)")
-            Menu {
-                Picker("Modalità sicura", selection: $model.safeMode) {
-                    ForEach(SafeMode.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.inline)
-                Divider()
-                Button("Riconnetti (nuovo token)") { Task { await model.reconnect() } }
-            } label: {
-                Label("Sicurezza", systemImage: model.safeMode == .silent ? "lock.open" : "lock.fill")
-            }
-            Toggle(isOn: $model.showsConsole) { Label("Console", systemImage: "list.bullet.rectangle") }
-                .help("Log delle query")
-            Toggle(isOn: $model.showsRowDetail) { Label("Dettaglio", systemImage: "sidebar.right") }
-                .help("Dettaglio riga")
+        case nil: EmptyWorkspaceView(model: model)
         }
     }
 }
 
-private struct ConnectionChip: View {
-    let connection: ConnectionConfig
-    let phase: ConnectionPhase
+private struct EmptyWorkspaceView: View {
+    let model: WorkspaceModel
 
     var body: some View {
-        HStack(spacing: 6) {
-            Circle().fill(dotColor).frame(width: 8, height: 8)
-            Text(connection.name).font(.callout.weight(.medium))
-            TagBadge(tag: connection.tag)
+        VStack(spacing: 18) {
+            Image(systemName: "tablecells")
+                .font(.system(size: 44, weight: .light))
+                .foregroundStyle(.tertiary)
+            VStack(spacing: 6) {
+                ShortcutHint(keys: "⌘K", text: "Apri un'altra connessione")
+                if !model.isDSQL { ShortcutHint(keys: "⌘D", text: "Apri un database") }
+                ShortcutHint(keys: "⌘T", text: "Nuova query SQL")
+                ShortcutHint(keys: "⌘P", text: "Cerca una tabella nella barra laterale")
+            }
         }
-        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .textBackgroundColor))
     }
+}
 
-    private var dotColor: Color {
-        switch phase {
-        case .connected: .green
-        case .connecting, .needsPassword: .yellow
-        case .failed: .red
+private struct ShortcutHint: View {
+    let keys: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(text).foregroundStyle(.secondary)
+            Spacer()
+            Text(keys)
+                .font(.system(.callout, design: .rounded).weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
         }
+        .font(.callout)
+        .frame(width: 300)
     }
 }
 

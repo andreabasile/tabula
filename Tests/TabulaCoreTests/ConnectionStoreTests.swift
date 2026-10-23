@@ -79,3 +79,14 @@ struct ConnectionURLTests {
         #expect(ConnectionURL.format(connection) == "postgresql://u@h:5433/d?sslmode=prefer")
     }
 }
+
+struct DatabaseSwitchTests {
+    @Test func switchingKeepsEverythingButTheDatabase() {
+        let original = ConnectionConfig(name: "pg", tag: .staging, kind: .postgres(PostgresSettings(host: "h", user: "u", database: "app")))
+        let switched = original.switchingDatabase(to: "analytics")
+        #expect(switched.database == "analytics")
+        #expect(switched.id == original.id)
+        #expect(switched.host == "h")
+        #expect(switched.tag == .staging)
+    }
+}

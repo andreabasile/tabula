@@ -15,16 +15,27 @@ struct TabulaApp: App {
         .windowResizability(.contentSize)
         .defaultSize(width: 760, height: 460)
 
-        WindowGroup("Workspace", id: WindowID.workspace, for: UUID.self) { $connectionID in
-            if let connectionID, let connection = model.connection(connectionID) {
-                WorkspaceView(connection: connection)
+        WindowGroup("Workspace", id: WindowID.workspace, for: WorkspaceTarget.self) { $target in
+            if let target, let connection = model.connection(target.connectionID) {
+                WorkspaceView(connection: connection, target: target)
                     .environment(model)
             } else {
-                ContentUnavailableView("Connessione non trovata", systemImage: "externaldrive.badge.xmark")
+                MissingConnectionView()
             }
         }
         .defaultSize(width: 1280, height: 800)
+        // Sessions cannot survive a relaunch, so restored windows would only be empty shells.
+        .restorationBehavior(.disabled)
         .commands { WorkspaceCommands() }
+    }
+}
+
+/// A workspace whose connection was deleted closes itself instead of lingering empty.
+private struct MissingConnectionView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Color.clear.onAppear { dismiss() }
     }
 }
 

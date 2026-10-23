@@ -47,9 +47,10 @@ enum ConnectionPhase: Equatable {
 @MainActor
 @Observable
 final class WorkspaceModel {
-    let connection: ConnectionConfig
+    private(set) var connection: ConnectionConfig
     private(set) var phase: ConnectionPhase = .connecting
     private(set) var status = ConnectionStatus()
+    private(set) var databases: [String] = []
     private(set) var schemas: [String] = []
     var selectedSchema = "public" { didSet { if oldValue != selectedSchema { Task { await loadTables() } } } }
     private(set) var tables: [TableInfo] = []
@@ -60,26 +61,36 @@ final class WorkspaceModel {
     var pendingConfirmation: PendingConfirmation?
     var showsConsole = false
     var showsRowDetail = true
+    private(set) var runningQueries = 0
+    var presentedSheet: WorkspaceSheet?
+    /// Bumped by ⌘P to move focus to the sidebar search field.
+    var tableSearchFocusRequest = 0
 
-    private let session: ManagedSession
-    private var askedPassword: String?
+    private var session: ManagedSession
+    private let sessionFactory: SessionFactory
+    private let storedPassword: String?
+    private let passwordBox = PasswordBox()
     private var queryCounter = 0
 
     init(connection: ConnectionConfig, appModel: AppModel) {
         self.connection = connection
         self.safeMode = connection.safeMode
-        let storedPassword = appModel.savedPassword(for: connection.id)
-        let passwordBox = PasswordBox()
-        self.session = appModel.sessionFactory.makeSession(for: connection) {
-            await passwordBox.value ?? storedPassword
-        }
-        self.passwordBox = passwordBox
+        self.sessionFactory = appModel.sessionFactory
+        self.storedPassword = appModel.savedPassword(for: connection.id)
+        self.session = Self.makeSession(connection, factory: appModel.sessionFactory, passwordBox: passwordBox, storedPassword: storedPassword)
         if case .postgres(let settings) = connection.kind, settings.passwordStorage == .askEveryTime {
             phase = .needsPassword
         }
     }
 
-    private let passwordBox: PasswordBox
+    private static func makeSession(
+        _ connection: ConnectionConfig,
+        factory: SessionFactory,
+        passwordBox: PasswordBox,
+        storedPassword: String?
+    ) -> ManagedSession {
+        factory.makeSession(for: connection) { await passwordBox.value ?? storedPassword }
+    }
 
     var selectedTab: WorkspaceTab? { tabs.first { $0.id == selectedTabID } }
 
@@ -92,10 +103,28 @@ final class WorkspaceModel {
 
     func start() async {
         guard phase != .needsPassword else { return }
+        await observe(session)
+        await connect()
+    }
+
+    private func observe(_ session: ManagedSession) async {
         await session.onStatusChange { [weak self] status in
             Task { @MainActor in self?.status = status }
         }
-        await connect()
+    }
+
+    /// Reopens the session on another database of the same server, closing open tabs.
+    func switchDatabase(to database: String) async {
+        guard database != connection.database else { return }
+        await session.close()
+        connection = connection.switchingDatabase(to: database)
+        session = Self.makeSession(connection, factory: sessionFactory, passwordBox: passwordBox, storedPassword: storedPassword)
+        tabs = []
+        selectedTabID = nil
+        tables = []
+        schemas = []
+        status = ConnectionStatus()
+        await start()
     }
 
     func providePassword(_ password: String) async {
@@ -110,6 +139,7 @@ final class WorkspaceModel {
             try await session.connect()
             phase = .connected
             await loadSchemas()
+            await loadDatabases()
         } catch {
             phase = .failed(error.localizedDescription)
         }
@@ -127,6 +157,11 @@ final class WorkspaceModel {
 
     func close() async {
         await session.close()
+    }
+
+    func disconnect() async {
+        await session.close()
+        phase = .failed("Disconnessa. Premi Riprova per riconnetterti.")
     }
 
     // MARK: Queries
@@ -152,6 +187,8 @@ final class WorkspaceModel {
     }
 
     private func logged(_ sql: String, _ operation: () async throws -> QueryResult) async throws -> QueryResult {
+        runningQueries += 1
+        defer { runningQueries -= 1 }
         do {
             let result = try await operation()
             append(LogEntry(date: Date(), sql: sql, outcome: .success(summary(of: result))))
@@ -184,6 +221,11 @@ final class WorkspaceModel {
     }
 
     // MARK: Schema browser
+
+    func loadDatabases() async {
+        guard !isDSQL, let result = try? await runInternal(Introspection.databases) else { return }
+        databases = result.rows.compactMap { $0.first?.textValue }
+    }
 
     func loadSchemas() async {
         guard let result = try? await runInternal(Introspection.schemas) else { return }

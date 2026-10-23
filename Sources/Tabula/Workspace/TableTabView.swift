@@ -15,7 +15,6 @@ struct TableTabView: View {
             case .data: grid
             case .structure: StructureView(table: table)
             }
-            Divider()
             bottomBar
         }
         .popover(isPresented: $showsPendingSQL, arrowEdge: .bottom) {
@@ -51,51 +50,85 @@ struct TableTabView: View {
     }
 
     private var bottomBar: some View {
-        HStack(spacing: 10) {
-            Picker("", selection: $table.mode) {
-                ForEach(TableTabMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        HStack(spacing: 4) {
+            ForEach(TableTabMode.allCases, id: \.self) { mode in
+                BarTextButton(title: mode.rawValue, isOn: table.mode == mode) { table.mode = mode }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-
             if table.mode == .data {
-                Button { table.addRow() } label: { Image(systemName: "plus") }
-                    .help("Nuova riga")
+                BarDivider()
+                BarTextButton(title: "+ Riga", isOn: false) { table.addRow() }
                     .disabled(!table.canEdit)
-                Button { table.deleteSelectedRows() } label: { Image(systemName: "minus") }
-                    .help("Elimina righe selezionate")
+                    .help("Nuova riga")
+                BarTextButton(title: "Elimina", isOn: false) { table.deleteSelectedRows() }
                     .disabled(!table.canEdit || table.selectedRows.isEmpty)
-                Button { table.showsFilters.toggle() } label: { Image(systemName: "line.3.horizontal.decrease.circle") }
+                    .help("Elimina righe selezionate (⌫)")
+                BarTextButton(title: "Filtri", isOn: table.showsFilters) { table.showsFilters.toggle() }
                     .help("Filtri (⌘F)")
                 if !table.canEdit, table.structure != nil {
-                    Text("Senza chiave primaria: sola lettura").font(.caption).foregroundStyle(.secondary)
+                    Text("Senza chiave primaria: sola lettura").font(.system(size: 11)).foregroundStyle(.secondary).padding(.leading, 6)
                 }
             }
-            Spacer()
+            Spacer(minLength: 12)
             if !table.changes.isEmpty {
                 Button("\(table.changes.count) modifiche") { showsPendingSQL = true }
                     .buttonStyle(.link)
+                    .font(.system(size: 11))
                 Button("Annulla") { table.discardChanges() }
-                Button("Salva modifiche") { Task { await table.commit() } }
+                    .controlSize(.small)
+                Button("Salva ⌘S") { Task { await table.commit() } }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                     .keyboardShortcut("s")
+                BarDivider()
             }
             if table.mode == .data {
                 Button { Task { await table.goToPage(-1) } } label: { Image(systemName: "chevron.left") }
                     .disabled(!table.hasPreviousPage)
-                Text(table.pageDescription).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Text("\(table.pageDescription) righe")
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
                 Button { Task { await table.goToPage(1) } } label: { Image(systemName: "chevron.right") }
                     .disabled(!table.hasNextPage)
-                Button { Task { await table.loadData() } } label: { Image(systemName: "arrow.clockwise") }
-                    .help("Ricarica")
+                BarDivider()
+                Button { Task { await table.loadData() } } label: {
+                    if table.isLoading { ProgressView().controlSize(.mini) } else { Image(systemName: "arrow.clockwise") }
+                }
+                .help("Ricarica")
             }
         }
         .buttonStyle(.borderless)
-        .controlSize(.small)
-        .padding(.horizontal, 10)
-        .frame(height: 30)
-        .background(.bar)
+        .font(.system(size: 11))
+        .padding(.horizontal, 8)
+        .frame(height: 28)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .top) { Divider() }
+    }
+}
+
+/// The small text toggles in TablePlus's bottom bar ("Data", "Structure", "+ Row").
+struct BarTextButton: View {
+    let title: String
+    let isOn: Bool
+    let action: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: isOn ? .semibold : .regular))
+                .foregroundStyle(isEnabled ? (isOn ? .primary : .secondary) : .tertiary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(isOn ? Color.primary.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct BarDivider: View {
+    var body: some View {
+        Rectangle().fill(.separator).frame(width: 1, height: 14).padding(.horizontal, 4)
     }
 }
 

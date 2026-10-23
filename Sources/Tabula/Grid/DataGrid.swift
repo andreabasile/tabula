@@ -25,14 +25,15 @@ struct DataGrid: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let tableView = GridTableView()
         tableView.style = .plain
-        tableView.usesAlternatingRowBackgroundColors = true
+        tableView.usesAlternatingRowBackgroundColors = false
         tableView.allowsMultipleSelection = true
         tableView.allowsColumnReordering = true
         tableView.allowsColumnResizing = true
         tableView.columnAutoresizingStyle = .noColumnAutoresizing
-        tableView.gridStyleMask = [.solidVerticalGridLineMask]
+        tableView.gridStyleMask = [.solidVerticalGridLineMask, .solidHorizontalGridLineMask]
+        tableView.gridColor = NSColor.separatorColor.withAlphaComponent(0.35)
         tableView.intercellSpacing = NSSize(width: 0, height: 0)
-        tableView.rowHeight = 22
+        tableView.rowHeight = 24
         tableView.dataSource = context.coordinator
         tableView.delegate = context.coordinator
         tableView.menu = context.coordinator.makeMenu()
@@ -136,7 +137,8 @@ struct DataGrid: NSViewRepresentable {
             let column = field.tag
             let typed = field.stringValue
             let current = parent.source.value(row, column)
-            guard typed != GridCell.displayString(current) else { return }
+            // NULL/DEFAULT/EMPTY show as placeholders, so an untouched cell reads back as "".
+            guard typed != GridCell.editableString(current) else { return }
             parent.source.onEdit(row, column, .text(typed))
         }
 
@@ -266,7 +268,7 @@ final class GridCell: NSTableCellView {
         field.drawsBackground = false
         field.lineBreakMode = .byTruncatingTail
         field.cell?.usesSingleLineMode = true
-        field.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        field.font = .systemFont(ofSize: 12)
         field.translatesAutoresizingMaskIntoConstraints = false
         addSubview(field)
         textField = field
@@ -280,18 +282,30 @@ final class GridCell: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    static func displayString(_ value: CellValue) -> String {
-        value.displayText.replacingOccurrences(of: "\n", with: "⏎")
+    /// Multi-line values are shown on one line, as TablePlus does.
+    static func editableString(_ value: CellValue) -> String {
+        (value.textValue ?? "").replacingOccurrences(of: "\n", with: "⏎")
+    }
+
+    private static func placeholder(for value: CellValue) -> String? {
+        switch value {
+        case .null: "NULL"
+        case .defaultValue: "DEFAULT"
+        case .text(let text): text.isEmpty ? "EMPTY" : nil
+        }
     }
 
     func configure(value: CellValue, state: CellState, editable: Bool) {
         guard let field = textField else { return }
-        field.stringValue = Self.displayString(value)
-        field.isEditable = editable && state != .deleted
-        switch value {
-        case .null, .defaultValue: field.textColor = .tertiaryLabelColor
-        case .text: field.textColor = .labelColor
+        field.stringValue = Self.editableString(value)
+        field.placeholderAttributedString = Self.placeholder(for: value).map {
+            NSAttributedString(string: $0, attributes: [
+                .foregroundColor: NSColor.tertiaryLabelColor,
+                .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            ])
         }
+        field.isEditable = editable && state != .deleted
+        field.textColor = .labelColor
         layer?.backgroundColor = switch state {
         case .normal: nil
         case .edited: NSColor.systemYellow.withAlphaComponent(0.28).cgColor

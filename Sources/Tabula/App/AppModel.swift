@@ -6,6 +6,8 @@ import TabulaCore
 @Observable
 final class AppModel {
     private(set) var connections: [ConnectionConfig] = []
+    /// Workspace windows currently open, keyed by window target.
+    private(set) var openWorkspaces: [UUID: WorkspaceModel] = [:]
     var loadError: String?
 
     let store: ConnectionStore
@@ -44,6 +46,18 @@ final class AppModel {
         copy.id = UUID()
         copy.name += " copia"
         try save(copy, password: try store.password(for: connection.id))
+    }
+
+    func register(_ workspace: WorkspaceModel, target: UUID) {
+        openWorkspaces[target] = workspace
+    }
+
+    func unregister(target: UUID) {
+        openWorkspaces[target] = nil
+    }
+
+    func isOpen(_ connectionID: UUID) -> Bool {
+        openWorkspaces.values.contains { $0.connection.id == connectionID }
     }
 
     func savedPassword(for id: UUID) -> String? {
