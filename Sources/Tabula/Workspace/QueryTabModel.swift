@@ -147,11 +147,16 @@ final class QueryTabModel {
 
     /// "line 2, column 15, location 23", as in TablePlus's editor footer.
     var cursorDescription: String {
-        let location = min(selection.location, (text as NSString).length)
-        let before = (text as NSString).substring(to: location)
-        let line = before.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
-        let column = (before.split(separator: "\n", omittingEmptySubsequences: false).last?.utf16.count ?? 0) + 1
-        return "riga \(line), colonna \(column), posizione \(location)"
+        let units = text.utf16Units
+        let location = min(selection.location, units.count)
+        var line = 1
+        var lineStart = 0
+        var offset = 0
+        for unit in units[..<location] {
+            offset += 1
+            if unit == 0x0A { line += 1; lineStart = offset }
+        }
+        return "riga \(line), colonna \(location - lineStart + 1), posizione \(location)"
     }
 
     /// Indexes of the rows matching the result search box.

@@ -99,12 +99,13 @@ public enum SQLCompleter {
     ]
 
     public static func complete(text: String, cursor: Int, catalog: SchemaCatalog) -> CompletionResult {
-        let units = Array(text.utf16)
+        let units = text.utf16Units
         let cursor = min(max(cursor, 0), units.count)
         let wordStart = scanBack(units, from: cursor, while: isIdentifier)
         let prefix = String(decoding: units[wordStart..<cursor], as: UTF16.self).replacingOccurrences(of: "\"", with: "")
         let range = wordStart..<cursor
-        let statement = StatementSplitter.statement(in: text, at: cursor)?.text ?? text
+        let current = StatementSplitter.statement(in: text, at: cursor)
+        let statement = current?.text ?? text
         let references = tableReferences(in: statement, catalog: catalog)
 
         if wordStart > 0, units[wordStart - 1] == UInt16(UInt8(ascii: ".")) {
@@ -113,7 +114,8 @@ public enum SQLCompleter {
             return CompletionResult(replacementRange: range, items: columnsAfterQualifier(qualifier, prefix: prefix, references: references, catalog: catalog))
         }
 
-        let before = String(decoding: units[..<wordStart], as: UTF16.self)
+        // Only the current statement matters: reading the whole script made every keystroke O(script).
+        let before = String(decoding: units[min(current?.range.lowerBound ?? 0, wordStart)..<wordStart], as: UTF16.self)
         let keyword = lastKeyword(in: before)
         let items: [CompletionItem]
         if let keyword, tableKeywords.contains(keyword), !endsAfterTableName(before) {
