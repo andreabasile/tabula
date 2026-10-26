@@ -15,7 +15,12 @@ struct SQLEditor: NSViewRepresentable {
         let scrollView = SQLTextView.scrollableTextView()
         guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
         let editor = SQLTextView(frame: textView.frame, textContainer: textView.textContainer)
+        // init(frame:textContainer:) caps maxSize at the initial frame: without these the
+        // editor never grows past one line and the text below cannot be scrolled to.
         editor.autoresizingMask = textView.autoresizingMask
+        editor.minSize = textView.minSize
+        editor.maxSize = textView.maxSize
+        editor.isHorizontallyResizable = textView.isHorizontallyResizable
         editor.isVerticallyResizable = true
         editor.isRichText = false
         editor.allowsUndo = true
