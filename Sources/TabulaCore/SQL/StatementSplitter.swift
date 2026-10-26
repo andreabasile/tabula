@@ -9,26 +9,61 @@ public struct SQLStatement: Equatable, Sendable {
 /// Splits a script on `;` while respecting quotes, dollar quotes and comments.
 public enum StatementSplitter {
     public static func split(_ script: String) -> [SQLStatement] {
-        var scanner = Scanner(script)
-        var statements: [SQLStatement] = []
+        let units = script.utf16Units
+        return segments(units).compactMap { statement(units, in: $0) }
+    }
+
+    /// The statement under the cursor, as TablePlus's "Run current" does.
+    /// Only the segments next to the cursor are turned into strings, so this stays cheap on long scripts.
+    public static func statement(in script: String, at cursor: Int) -> SQLStatement? {
+        let units = script.utf16Units
+        let segments = segments(units)
+        guard let index = segments.lastIndex(where: { $0.lowerBound <= cursor }) else {
+            return segments.lazy.compactMap { statement(units, in: $0) }.first { cursor >= $0.range.lowerBound }
+        }
+        // Right after a `;` the cursor still belongs to the statement it closes.
+        for candidate in [index - 1, index] where candidate >= 0 {
+            if let found = statement(units, in: segments[candidate]),
+               cursor >= found.range.lowerBound, cursor <= found.range.upperBound + 1 {
+                return found
+            }
+        }
+        for candidate in stride(from: index, through: 0, by: -1) {
+            if let found = statement(units, in: segments[candidate]), found.range.upperBound < cursor { return found }
+        }
+        return nil
+    }
+
+    /// Raw ranges between top-level `;`, without building any string.
+    private static func segments(_ units: [UTF16.CodeUnit]) -> [Range<Int>] {
+        var scanner = Scanner(units)
+        var segments: [Range<Int>] = []
         var start = 0
         while let character = scanner.peek() {
             if scanner.skipQuotedOrComment() { continue }
             scanner.advance()
             if character == 0x3B {
-                append(script, from: start, to: scanner.offset - 1, into: &statements)
+                segments.append(start..<(scanner.offset - 1))
                 start = scanner.offset
             }
         }
-        append(script, from: start, to: scanner.offset, into: &statements)
-        return statements
+        segments.append(start..<scanner.offset)
+        return segments
     }
 
-    /// The statement under the cursor, as TablePlus's "Run current" does.
-    public static func statement(in script: String, at cursor: Int) -> SQLStatement? {
-        let statements = split(script)
-        return statements.first { cursor >= $0.range.lowerBound && cursor <= $0.range.upperBound + 1 }
-            ?? statements.last { $0.range.upperBound < cursor }
+    /// Where the comment or quoted text spanning `offset` begins, or `offset` itself in plain SQL.
+    /// Lets the editor color a window of a long script as if it had read it from the top.
+    public static func regionStart(containing offset: Int, in script: String) -> Int {
+        var scanner = Scanner(script)
+        while scanner.offset < offset, scanner.peek() != nil {
+            let before = scanner.offset
+            if scanner.skipQuotedOrComment() {
+                if scanner.offset > offset { return before }
+                continue
+            }
+            scanner.advance()
+        }
+        return offset
     }
 
     public static func strippingComments(_ sql: String) -> String {
@@ -50,17 +85,15 @@ public enum StatementSplitter {
         return String(decoding: output, as: UTF16.self)
     }
 
-    private static func append(_ script: String, from start: Int, to end: Int, into statements: inout [SQLStatement]) {
-        let units = Array(script.utf16)
-        guard start < end else { return }
-        let raw = String(decoding: units[start..<end], as: UTF16.self)
-        let leading = raw.utf16.prefix { isWhitespace($0) }.count
-        let trailing = raw.utf16.reversed().prefix { isWhitespace($0) }.count
-        guard leading < raw.utf16.count else { return }
-        let range = (start + leading)..<(end - trailing)
-        let text = String(decoding: units[range], as: UTF16.self)
-        guard !strippingComments(text).allSatisfy(\.isWhitespace) else { return }
-        statements.append(SQLStatement(text: text, range: range))
+    private static func statement(_ units: [UTF16.CodeUnit], in segment: Range<Int>) -> SQLStatement? {
+        var start = segment.lowerBound
+        var end = segment.upperBound
+        while start < end, isWhitespace(units[start]) { start += 1 }
+        while end > start, isWhitespace(units[end - 1]) { end -= 1 }
+        guard start < end else { return nil }
+        let text = String(decoding: units[start..<end], as: UTF16.self)
+        guard !strippingComments(text).allSatisfy(\.isWhitespace) else { return nil }
+        return SQLStatement(text: text, range: start..<end)
     }
 
     private static func isWhitespace(_ unit: UTF16.CodeUnit) -> Bool {
@@ -73,7 +106,11 @@ private struct Scanner {
     var offset = 0
 
     init(_ text: String) {
-        units = Array(text.utf16)
+        units = text.utf16Units
+    }
+
+    init(_ units: [UTF16.CodeUnit]) {
+        self.units = units
     }
 
     func peek(_ ahead: Int = 0) -> UTF16.CodeUnit? {

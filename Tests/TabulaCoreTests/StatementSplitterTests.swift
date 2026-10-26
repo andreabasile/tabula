@@ -44,6 +44,20 @@ struct StatementSplitterTests {
         #expect(StatementSplitter.statement(in: script, at: 9)?.text == "SELECT 1")
     }
 
+    @Test func cursorInGapBetweenStatementsPicksThePreviousOne() {
+        let script = "SELECT 1;\n\n  -- note\n\nSELECT 2;"
+        #expect(StatementSplitter.statement(in: script, at: 12)?.text == "SELECT 1")
+        #expect(StatementSplitter.statement(in: script, at: 0)?.text == "SELECT 1")
+    }
+
+    @Test func regionStartFindsTheEnclosingCommentOrString() {
+        let script = "SELECT 'a;b' /* long\ncomment */ FROM t"
+        #expect(StatementSplitter.regionStart(containing: 9, in: script) == 7)
+        #expect(StatementSplitter.regionStart(containing: 20, in: script) == 13)
+        #expect(StatementSplitter.regionStart(containing: 34, in: script) == 34)
+        #expect(StatementSplitter.regionStart(containing: 12, in: script) == 12)
+    }
+
     @Test func rangesUseUTF16Offsets() {
         let script = "SELECT 'è🙂'; SELECT 2"
         let second = StatementSplitter.split(script)[1]

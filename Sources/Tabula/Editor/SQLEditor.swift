@@ -30,6 +30,9 @@ struct SQLEditor: NSViewRepresentable {
         editor.isAutomaticSpellingCorrectionEnabled = false
         editor.isContinuousSpellCheckingEnabled = false
         editor.font = SQLHighlighter.font
+        editor.textColor = .labelColor
+        // Lay out only what is on screen: full layout of a long script took seconds per keystroke.
+        editor.layoutManager?.allowsNonContiguousLayout = true
         editor.textContainerInset = NSSize(width: 8, height: 8)
         editor.delegate = context.coordinator
         editor.onRunCurrent = { context.coordinator.parent.onRunCurrent() }
@@ -43,7 +46,7 @@ struct SQLEditor: NSViewRepresentable {
         scrollView.verticalRulerView = LineNumberRuler(textView: editor)
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
-        SQLHighlighter.highlight(editor.textStorage)
+        context.coordinator.observeScrolling(of: editor, in: scrollView)
         return scrollView
     }
 
@@ -51,7 +54,7 @@ struct SQLEditor: NSViewRepresentable {
         context.coordinator.parent = self
         guard let editor = scrollView.documentView as? NSTextView, editor.string != text else { return }
         editor.string = text
-        SQLHighlighter.highlight(editor.textStorage)
+        SQLHighlighter.highlightVisible(in: editor)
     }
 
     @MainActor
@@ -62,10 +65,20 @@ struct SQLEditor: NSViewRepresentable {
             self.parent = parent
         }
 
+        /// Colors follow the viewport, so they are refreshed on scroll and resize.
+        func observeScrolling(of editor: NSTextView, in scrollView: NSScrollView) {
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            for (name, object) in [(NSView.boundsDidChangeNotification, scrollView.contentView as NSView), (NSView.frameDidChangeNotification, editor)] {
+                NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { [weak editor] _ in
+                    MainActor.assumeIsolated { if let editor { SQLHighlighter.highlightVisible(in: editor) } }
+                }
+            }
+        }
+
         func textDidChange(_ notification: Notification) {
             guard let editor = notification.object as? SQLTextView else { return }
             parent.text = editor.string
-            SQLHighlighter.highlight(editor.textStorage)
+            SQLHighlighter.highlightVisible(in: editor)
             editor.updateCompletions(automatic: true)
         }
 
@@ -199,24 +212,25 @@ enum SQLHighlighter {
     private static let numberPattern = try! NSRegularExpression(pattern: "\\b\\d+(\\.\\d+)?\\b")
     private static let commentPattern = try! NSRegularExpression(pattern: "--[^\\n]*|/\\*[\\s\\S]*?(\\*/|$)")
 
-    @MainActor
-    static func highlight(_ storage: NSTextStorage?) {
-        guard let storage else { return }
-        let text = storage.string
-        let whole = NSRange(location: 0, length: (text as NSString).length)
-        storage.beginEditing()
-        storage.setAttributes([.font: font, .foregroundColor: NSColor.labelColor], range: whole)
-        apply(keywordPattern, color: .systemPink, in: storage, text: text, range: whole)
-        apply(numberPattern, color: .systemPurple, in: storage, text: text, range: whole)
-        apply(stringPattern, color: .systemRed, in: storage, text: text, range: whole)
-        apply(commentPattern, color: .systemGray, in: storage, text: text, range: whole)
-        storage.endEditing()
-    }
-
-    @MainActor
-    private static func apply(_ pattern: NSRegularExpression, color: NSColor, in storage: NSTextStorage, text: String, range: NSRange) {
-        for match in pattern.matches(in: text, range: range) {
-            storage.addAttribute(.foregroundColor, value: color, range: match.range)
+    /// Colors what is on screen plus a margin, with temporary attributes: they never touch the
+    /// text storage, so a keystroke does not re-layout (or re-color) a long script.
+    static func highlightVisible(in textView: NSTextView) {
+        guard let layoutManager = textView.layoutManager, let container = textView.textContainer else { return }
+        let string = textView.string
+        let text = string as NSString
+        let glyphs = layoutManager.glyphRange(forBoundingRect: textView.visibleRect, in: container)
+        let visible = layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        let margin = 4_000
+        let lower = max(0, visible.location - margin)
+        let upper = min(text.length, NSMaxRange(visible) + margin)
+        let lines = text.lineRange(for: NSRange(location: lower, length: upper - lower))
+        let start = StatementSplitter.regionStart(containing: lines.location, in: string)
+        let window = NSRange(location: start, length: NSMaxRange(lines) - start)
+        layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: window)
+        for (pattern, color) in [(keywordPattern, NSColor.systemPink), (numberPattern, .systemPurple), (stringPattern, .systemRed), (commentPattern, .systemGray)] {
+            for match in pattern.matches(in: string, range: window) {
+                layoutManager.addTemporaryAttribute(.foregroundColor, value: color, forCharacterRange: match.range)
+            }
         }
     }
 }

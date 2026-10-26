@@ -1,4 +1,5 @@
 import AppKit
+import TabulaCore
 
 /// The gutter with line numbers on the left of the SQL editor, as in TablePlus.
 final class LineNumberRuler: NSRulerView {
@@ -27,7 +28,7 @@ final class LineNumberRuler: NSRulerView {
         let text = textView.string as NSString
         let visible = layoutManager.glyphRange(forBoundingRect: textView.visibleRect, in: container)
         let firstCharacter = layoutManager.characterIndexForGlyph(at: visible.location)
-        var lineNumber = text.substring(to: firstCharacter).reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+        var lineNumber = textView.string.utf16Units[..<firstCharacter].lazy.filter { $0 == 0x0A }.count + 1
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.tertiaryLabelColor]
         let offset = convert(NSPoint.zero, from: textView).y + textView.textContainerInset.height
         var characterIndex = firstCharacter
