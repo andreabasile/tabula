@@ -16,6 +16,9 @@ final class CompletionPopup: NSObject, NSTableViewDataSource, NSTableViewDelegat
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 460, height: 200), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         super.init()
         panel.isFloatingPanel = true
+        // The editor hides the list itself when its window loses focus; an auto-hidden panel
+        // would come back on reactivation, still attached and no longer tracked.
+        panel.hidesOnDeactivate = false
         panel.hasShadow = true
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -69,8 +72,9 @@ final class CompletionPopup: NSObject, NSTableViewDataSource, NSTableViewDelegat
         panel.orderFront(nil)
     }
 
+    /// Detaches even when the panel is not on screen: a child window left on its parent is
+    /// ordered front again together with it.
     func hide() {
-        guard panel.isVisible else { return }
         panel.parent?.removeChildWindow(panel)
         panel.orderOut(nil)
     }

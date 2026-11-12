@@ -70,7 +70,12 @@ struct SQLEditor: NSViewRepresentable {
             scrollView.contentView.postsBoundsChangedNotifications = true
             for (name, object) in [(NSView.boundsDidChangeNotification, scrollView.contentView as NSView), (NSView.frameDidChangeNotification, editor)] {
                 NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { [weak editor] _ in
-                    MainActor.assumeIsolated { if let editor { SQLHighlighter.highlightVisible(in: editor) } }
+                    MainActor.assumeIsolated {
+                        guard let editor else { return }
+                        SQLHighlighter.highlightVisible(in: editor)
+                        // The list is placed at the caret: once the text scrolls it points elsewhere.
+                        if name == NSView.boundsDidChangeNotification { (editor as? SQLTextView)?.hideCompletions() }
+                    }
                 }
             }
         }
@@ -137,9 +142,36 @@ final class SQLTextView: NSTextView {
         (string as NSString).substring(with: NSRange(location: range.lowerBound, length: range.count))
     }
 
+    func hideCompletions() {
+        popup.hide()
+    }
+
     override func resignFirstResponder() -> Bool {
         popup.hide()
         return super.resignFirstResponder()
+    }
+
+    /// SwiftUI can drop or recreate the editor (tab switch, layout change) without making it
+    /// resign first responder: the popup must not outlive it on the window.
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        popup.hide()
+        if let window {
+            NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: window)
+        }
+        if let newWindow {
+            NotificationCenter.default.addObserver(self, selector: #selector(windowDidResignKey), name: NSWindow.didResignKeyNotification, object: newWindow)
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    @objc private func windowDidResignKey(_ notification: Notification) {
+        popup.hide()
+    }
+
+    /// A click moves the caret away from where the list was opened.
+    override func mouseDown(with event: NSEvent) {
+        popup.hide()
+        super.mouseDown(with: event)
     }
 
     override func draw(_ dirtyRect: NSRect) {

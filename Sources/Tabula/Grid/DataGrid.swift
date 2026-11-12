@@ -13,7 +13,8 @@ struct DataGridSource {
     var value: (Int, Int) -> CellValue
     var state: (Int, Int) -> CellState
     var onEdit: (Int, Int, CellValue) -> Void = { _, _, _ in }
-    var onSort: ((String, Bool) -> Void)?
+    /// Column index and direction; query results may repeat a column name.
+    var onSort: ((Int, Bool) -> Void)?
     var table: TableReference?
     var onDeleteRows: (() -> Void)?
     /// Number shown on the first row: 1, or the page offset + 1 for table pages.
@@ -70,6 +71,7 @@ struct DataGrid: NSViewRepresentable {
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
         var parent: DataGrid
         weak var tableView: NSTableView?
+        private var isRebuilding = false
 
         init(_ parent: DataGrid) {
             self.parent = parent
@@ -80,6 +82,10 @@ struct DataGrid: NSViewRepresentable {
         func rebuildColumns() {
             guard let tableView else { return }
             tableView.tableColumns.forEach(tableView.removeTableColumn)
+            // A new result starts unsorted: a stale header arrow would point at another column.
+            isRebuilding = true
+            tableView.sortDescriptors = []
+            isRebuilding = false
             guard !parent.source.columns.isEmpty else { return tableView.reloadData() }
             let numbers = NSTableColumn(identifier: Self.rowNumberIdentifier)
             numbers.title = ""
@@ -96,7 +102,7 @@ struct DataGrid: NSViewRepresentable {
                 tableColumn.width = contentWidth(for: index, column: column)
                 tableColumn.minWidth = 40
                 if parent.source.onSort != nil {
-                    tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.name, ascending: true)
+                    tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: String(index), ascending: true)
                 }
                 tableView.addTableColumn(tableColumn)
             }
@@ -140,8 +146,9 @@ struct DataGrid: NSViewRepresentable {
         }
 
         func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
-            guard let descriptor = tableView.sortDescriptors.first, let key = descriptor.key else { return }
-            parent.source.onSort?(key, descriptor.ascending)
+            guard !isRebuilding else { return }
+            guard let descriptor = tableView.sortDescriptors.first, let key = descriptor.key, let column = Int(key) else { return }
+            parent.source.onSort?(column, descriptor.ascending)
         }
 
         // MARK: Editing

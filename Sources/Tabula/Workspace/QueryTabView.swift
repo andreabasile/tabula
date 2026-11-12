@@ -110,12 +110,13 @@ struct QueryTabView: View {
                         source: DataGridSource(
                             columns: outcome.columns,
                             rowCount: visible.count,
-                            revision: outcome.revision &+ query.resultSearch.hashValue,
+                            revision: outcome.revision &+ query.resultSearch.hashValue &+ query.resultSort.hashValue,
                             isEditable: outcome.isEditable,
                             canEditColumn: { outcome.canEdit(column: $0) },
                             value: { outcome.value(row: visible[$0], column: $1) },
                             state: { outcome.state(row: visible[$0], column: $1) },
                             onEdit: { outcome.setValue($2, row: visible[$0], column: $1) },
+                            onSort: { query.sortResult(of: outcome, by: $0, ascending: $1) },
                             table: outcome.source?.table,
                             onDeleteRows: outcome.isEditable ? { outcome.deleteRows(query.selectedRows.map { visible[$0] }) } : nil
                         ),
