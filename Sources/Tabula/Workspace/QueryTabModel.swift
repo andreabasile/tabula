@@ -130,6 +130,14 @@ final class QueryTabModel {
     /// TablePlus's "No limit / 100 / 300 …" popup; 0 means no limit.
     var rowLimit = 0
     var resultSearch = ""
+    /// Header-click ordering of one outcome's rows, applied locally without re-running.
+    private(set) var resultSort: ResultSort?
+
+    struct ResultSort: Hashable {
+        let outcomeID: UUID
+        let column: Int
+        let ascending: Bool
+    }
 
     private unowned let workspace: WorkspaceModel
 
@@ -159,13 +167,25 @@ final class QueryTabModel {
         return "riga \(line), colonna \(location - lineStart + 1), posizione \(location)"
     }
 
-    /// Indexes of the rows matching the result search box.
+    /// Indexes of the rows matching the result search box, in the header-click order.
     func visibleRows(of outcome: StatementOutcome) -> [Int] {
         let query = resultSearch.trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty else { return Array(outcome.rows.indices) }
-        return outcome.rows.indices.filter { index in
-            outcome.rows[index].contains { $0.textValue?.localizedCaseInsensitiveContains(query) == true }
+        var rows = Array(outcome.rows.indices)
+        if !query.isEmpty {
+            rows = rows.filter { index in
+                outcome.rows[index].contains { $0.textValue?.localizedCaseInsensitiveContains(query) == true }
+            }
         }
+        guard let sort = resultSort, sort.outcomeID == outcome.id, outcome.columns.indices.contains(sort.column) else { return rows }
+        return ResultSorting.sort(rows, typeName: outcome.columns[sort.column].typeName, ascending: sort.ascending) {
+            outcome.value(row: $0, column: sort.column)
+        }
+    }
+
+    func sortResult(of outcome: StatementOutcome, by column: Int, ascending: Bool) {
+        resultSort = ResultSort(outcomeID: outcome.id, column: column, ascending: ascending)
+        // Row positions change, so the old selection would point at other rows.
+        selectedRows = []
     }
 
     // MARK: Running
@@ -203,6 +223,7 @@ final class QueryTabModel {
         outcomes = []
         selectedRows = []
         resultSearch = ""
+        resultSort = nil
         for statement in statements {
             let outcome = StatementOutcome(statement: statement)
             outcomes.append(outcome)

@@ -38,7 +38,7 @@ struct TableTabView: View {
                 value: { table.value(row: $0, column: $1) },
                 state: { table.state(row: $0, column: $1) },
                 onEdit: { table.setValue($2, row: $0, column: $1) },
-                onSort: { column, ascending in Task { await table.sort(by: column, ascending: ascending) } },
+                onSort: { column, ascending in Task { await table.sort(by: table.columns[column].name, ascending: ascending) } },
                 table: table.reference,
                 onDeleteRows: table.canEdit ? { table.deleteSelectedRows() } : nil,
                 firstRowNumber: table.query.page * table.query.pageSize + 1
