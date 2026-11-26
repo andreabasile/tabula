@@ -1536,7 +1536,26 @@
       }
     },
     "Copy Update Command" : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update-Befehl kopieren"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copier la commande de mise à jour"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copia comando di aggiornamento"
+          }
+        }
+      }
     },
     "Copy as URL" : {
       "localizations" : {
@@ -2755,7 +2774,26 @@
       }
     },
     "Later" : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Später"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plus tard"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Più tardi"
+          }
+        }
+      }
     },
     "Limit" : {
       "localizations" : {
@@ -3974,7 +4012,26 @@
       }
     },
     "Release Notes" : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Versionshinweise"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notes de version"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Note di rilascio"
+          }
+        }
+      }
     },
     "Reload" : {
       "localizations" : {
@@ -4725,7 +4782,26 @@
       }
     },
     "Tabula %@ is available" : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tabula %@ ist verfügbar"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tabula %@ est disponible"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tabula %@ è disponibile"
+          }
+        }
+      }
     },
     "Tag" : {
       "localizations" : {
@@ -5372,7 +5448,26 @@
       }
     },
     "You have version %@. You can update it with Homebrew:\nbrew upgrade --cask tabula" : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installiert ist Version %@. Das Update ist mit Homebrew möglich:\nbrew upgrade --cask tabula"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vous avez la version %@. Vous pouvez la mettre à jour avec Homebrew :\nbrew upgrade --cask tabula"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hai la versione %@. Puoi aggiornarla con Homebrew:\nbrew upgrade --cask tabula"
+          }
+        }
+      }
     },
     "Your edits have not been saved with ⌘S and will be lost." : {
       "localizations" : {
