@@ -17,6 +17,8 @@ Apple Silicon only, macOS 15+. The app is ad-hoc signed and not notarized: the c
 quarantine attribute after installation, otherwise Gatekeeper would block it from opening.
 libpq is bundled in the app. Aurora DSQL connections need the AWS CLI v2 (for example
 `/opt/homebrew/bin/aws` or `/usr/local/bin/aws`).
+At launch, Tabula checks GitHub for a newer release and, if there is one, shows a one-time notice
+with the update command (`brew upgrade --cask tabula`).
 
 ## How the DSQL token works
 
