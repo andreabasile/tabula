@@ -29,6 +29,6 @@ jobs:
       - name: Test
         run: swift test
 
-      # Same bundling as the release (ad-hoc signature); CI=true makes the minos check fatal.
+      # Same bundling as the release, signed ad-hoc; CI=true makes the minos check fatal.
       - name: Build app bundle
         run: TABULA_SIGN_IDENTITY=- ./scripts/build-app.sh
