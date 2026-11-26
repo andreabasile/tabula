@@ -32,7 +32,9 @@ public final class ConnectionStore: @unchecked Sendable {
         }
     }
 
-    public func save(_ connection: ConnectionConfig, password: String?) throws {
+    /// `keepingStoredPassword`: the form could not read the saved password (e.g. Keychain access
+    /// denied), so its empty field must not overwrite it.
+    public func save(_ connection: ConnectionConfig, password: String?, keepingStoredPassword: Bool = false) throws {
         var all = try load()
         if let index = all.firstIndex(where: { $0.id == connection.id }) {
             all[index] = connection
@@ -40,7 +42,7 @@ public final class ConnectionStore: @unchecked Sendable {
             all.append(connection)
         }
         try write(all)
-        if case .postgres(let settings) = connection.kind {
+        if case .postgres(let settings) = connection.kind, !(keepingStoredPassword && settings.passwordStorage == .keychain) {
             try secrets.setPassword(settings.passwordStorage == .keychain ? password : nil, for: connection.id)
         }
     }

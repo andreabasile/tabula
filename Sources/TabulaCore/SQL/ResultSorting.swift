@@ -4,7 +4,8 @@ import Foundation
 /// is not re-run, so the order follows PostgreSQL's defaults (NULLS LAST ascending,
 /// NULLS FIRST descending) and numbers compare as numbers.
 public enum ResultSorting {
-    private static let numericTypes: Set<String> = ["int2", "int4", "int8", "oid", "float4", "float8", "numeric", "money"]
+    /// Types compared as numbers here and right-aligned in the grid.
+    public static let numericTypes: Set<String> = ["int2", "int4", "int8", "oid", "float4", "float8", "numeric", "money"]
 
     /// Reorders `indexes` by `value(index)`; ties keep their original relative order.
     public static func sort(

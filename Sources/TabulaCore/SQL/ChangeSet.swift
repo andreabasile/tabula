@@ -1,17 +1,5 @@
 import Foundation
 
-public struct TableReference: Equatable, Hashable, Sendable {
-    public let schema: String
-    public let name: String
-
-    public init(schema: String, name: String) {
-        self.schema = schema
-        self.name = name
-    }
-
-    public var qualifiedName: String { SQLRendering.qualified(schema: schema, table: name) }
-}
-
 /// Pending edits on a table, committed together like TablePlus's ⌘S.
 public struct ChangeSet: Equatable, Sendable {
     public struct RowKey: Equatable, Hashable, Sendable {
@@ -55,10 +43,6 @@ public struct ChangeSet: Equatable, Sendable {
         updates[key] = nil
         updateOrder.removeAll { $0 == key }
         if !deletes.contains(key) { deletes.append(key) }
-    }
-
-    public mutating func undoDelete(_ key: RowKey) {
-        deletes.removeAll { $0 == key }
     }
 
     public func statements(for table: TableReference, columnOrder: [String]) -> [String] {

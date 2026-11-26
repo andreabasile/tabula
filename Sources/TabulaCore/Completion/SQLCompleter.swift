@@ -106,7 +106,7 @@ public enum SQLCompleter {
         let range = wordStart..<cursor
         let current = StatementSplitter.statement(in: text, at: cursor)
         let statement = current?.text ?? text
-        let references = tableReferences(in: statement, catalog: catalog)
+        let references = tableReferences(in: statement)
 
         if wordStart > 0, units[wordStart - 1] == UInt16(UInt8(ascii: ".")) {
             let qualifierStart = scanBack(units, from: wordStart - 1, while: isIdentifier)
@@ -129,16 +129,17 @@ public enum SQLCompleter {
 
     // MARK: Query understanding
 
-    struct TableReference: Equatable {
+    /// A table named in the statement, with its alias.
+    struct QueryTable: Equatable {
         let table: String
         let alias: String?
         var name: String { alias ?? table }
     }
 
     /// `FROM a x`, `JOIN b AS y`, `UPDATE c`… with their aliases, in order of appearance.
-    static func tableReferences(in sql: String, catalog: SchemaCatalog) -> [TableReference] {
-        let tokens = tokenize(StatementSplitter.strippingComments(sql))
-        var references: [TableReference] = []
+    static func tableReferences(in sql: String) -> [QueryTable] {
+        let tokens = tokenize(sql)
+        var references: [QueryTable] = []
         var index = 0
         while index < tokens.count {
             let token = tokens[index].lowercased()
@@ -158,7 +159,7 @@ public enum SQLCompleter {
                 alias = unquote(tokens[index])
                 index += 1
             }
-            references.append(TableReference(table: name, alias: alias))
+            references.append(QueryTable(table: name, alias: alias))
         }
         return references
     }
@@ -174,7 +175,7 @@ public enum SQLCompleter {
     }
 
     private static func lastKeyword(in text: String) -> String? {
-        let tokens = tokenize(StatementSplitter.strippingComments(text))
+        let tokens = tokenize(text)
         for token in tokens.reversed() {
             let lowered = token.lowercased()
             if reserved.contains(lowered) { return lowered }
@@ -188,14 +189,14 @@ public enum SQLCompleter {
     /// `FROM users |` or `FROM users u |`: a table is already there, so offer the next clause.
     private static func endsAfterTableName(_ text: String) -> Bool {
         guard text.last?.isWhitespace == true else { return false }
-        let tokens = tokenize(StatementSplitter.strippingComments(text))
+        let tokens = tokenize(text)
         guard let last = tokens.last else { return false }
         return isIdentifierToken(last) && !reserved.contains(last.lowercased())
     }
 
     // MARK: Suggestions
 
-    private static func columnsAfterQualifier(_ qualifier: String, prefix: String, references: [TableReference], catalog: SchemaCatalog) -> [CompletionItem] {
+    private static func columnsAfterQualifier(_ qualifier: String, prefix: String, references: [QueryTable], catalog: SchemaCatalog) -> [CompletionItem] {
         let table = references.first { $0.alias?.caseInsensitiveCompare(qualifier) == .orderedSame }?.table
             ?? references.first { $0.table.caseInsensitiveCompare(qualifier) == .orderedSame }?.table
             ?? qualifier
@@ -204,7 +205,7 @@ public enum SQLCompleter {
         return rank(items, prefix: prefix)
     }
 
-    private static func columnItems(references: [TableReference], catalog: SchemaCatalog) -> [CompletionItem] {
+    private static func columnItems(references: [QueryTable], catalog: SchemaCatalog) -> [CompletionItem] {
         let qualify = references.count > 1
         return references.flatMap { reference in
             (catalog.columns[reference.table] ?? []).map { column in
@@ -219,7 +220,7 @@ public enum SQLCompleter {
     }
 
     private static func tableItems(_ catalog: SchemaCatalog) -> [CompletionItem] {
-        catalog.tables.map { CompletionItem(label: $0, insertText: quoteIfNeeded($0), kind: .table, detail: "tabella") }
+        catalog.tables.map { CompletionItem(label: $0, insertText: quoteIfNeeded($0), kind: .table, detail: String(localized: "table")) }
     }
 
     private static func keywordItems() -> [CompletionItem] {
@@ -231,8 +232,8 @@ public enum SQLCompleter {
     }
 
     /// For every table already in the query, the tables linked to it by a key, with the ON clause.
-    static func joinSuggestions(references: [TableReference], catalog: SchemaCatalog) -> [CompletionItem] {
-        var usedNames = Set(references.map { $0.name.lowercased() })
+    static func joinSuggestions(references: [QueryTable], catalog: SchemaCatalog) -> [CompletionItem] {
+        let usedNames = Set(references.map { $0.name.lowercased() })
         var items: [CompletionItem] = []
         for reference in references {
             for key in catalog.joinableKeys {
@@ -252,7 +253,6 @@ public enum SQLCompleter {
                 items.append(CompletionItem(label: text, insertText: text, kind: .join, detail: "join"))
             }
         }
-        usedNames.removeAll()
         return items
     }
 
@@ -293,46 +293,9 @@ public enum SQLCompleter {
         return first == "\"" || first == "_" || first.isLetter
     }
 
+    /// Words and symbols only: strings and comments never name a table.
     private static func tokenize(_ sql: String) -> [String] {
-        var tokens: [String] = []
-        var current = ""
-        var inQuotes = false
-        var inString = false
-        for character in sql {
-            if inString {
-                if character == "'" { inString = false }
-                continue
-            }
-            if inQuotes {
-                current.append(character)
-                if character == "\"" {
-                    tokens.append(current)
-                    current = ""
-                    inQuotes = false
-                }
-                continue
-            }
-            if character == "'" {
-                flush(&current, into: &tokens)
-                inString = true
-            } else if character == "\"" {
-                flush(&current, into: &tokens)
-                current = "\""
-                inQuotes = true
-            } else if character.isLetter || character.isNumber || character == "_" || character == "$" {
-                current.append(character)
-            } else {
-                flush(&current, into: &tokens)
-                if !character.isWhitespace { tokens.append(String(character)) }
-            }
-        }
-        flush(&current, into: &tokens)
-        return tokens
-    }
-
-    private static func flush(_ current: inout String, into tokens: inout [String]) {
-        if !current.isEmpty { tokens.append(current) }
-        current = ""
+        SQLTokens.split(sql).filter { $0.kind != .string && $0.kind != .comment }.map(\.text)
     }
 
     private static func scanBack(_ units: [UInt16], from index: Int, while predicate: (UInt16) -> Bool) -> Int {

@@ -8,17 +8,22 @@ public protocol RunningScript: AnyObject, Sendable {
     var isRunning: Bool { get }
     var exitCode: Int32? { get }
     var output: String { get }
-    func terminate()
+    /// Asks the whole process tree to stop (SIGTERM) and returns at once.
+    func requestStop()
+    /// Waits until `deadline` for the tree to exit, then kills what is left.
+    func finishStop(by deadline: ContinuousClock.Instant)
+}
+
+extension RunningScript {
+    /// SIGTERM, up to a second to exit, then SIGKILL.
+    public func terminate() {
+        requestStop()
+        finishStop(by: .now + .seconds(1))
+    }
 }
 
 public protocol ScriptLaunching: Sendable {
     func launch(_ script: String) throws -> RunningScript
-}
-
-public struct TunnelEvent: Sendable {
-    public enum Kind: Sendable { case alreadyOpen, started, ready, stopped }
-    public let kind: Kind
-    public let endpoint: String
 }
 
 /// Runs pre-connect scripts and keeps the tunnels they open alive while some window
@@ -33,16 +38,11 @@ public actor TunnelManager {
     private let probe: PortProbing
     private let pollInterval: Duration
     private var tunnels: [String: Tunnel] = [:]
-    private var listener: (@Sendable (TunnelEvent) -> Void)?
 
     public init(launcher: ScriptLaunching, probe: PortProbing, pollInterval: Duration = .milliseconds(250)) {
         self.launcher = launcher
         self.probe = probe
         self.pollInterval = pollInterval
-    }
-
-    public func onEvent(_ listener: @escaping @Sendable (TunnelEvent) -> Void) {
-        self.listener = listener
     }
 
     /// Makes sure the script's effect is in place before `owner` connects to host:port.
@@ -62,7 +62,6 @@ public actor TunnelManager {
             if tunnel.owners.isEmpty {
                 tunnel.process.terminate()
                 tunnels[endpoint] = nil
-                listener?(TunnelEvent(kind: .stopped, endpoint: endpoint))
             } else {
                 tunnels[endpoint] = tunnel
             }
@@ -70,22 +69,24 @@ public actor TunnelManager {
     }
 
     public func releaseAll() {
-        tunnels.values.forEach { $0.process.terminate() }
+        let processes = tunnels.values.map(\.process)
         tunnels = [:]
+        // One shared grace period: a second per tunnel would outlast the app's wait at quit.
+        processes.forEach { $0.requestStop() }
+        let deadline = ContinuousClock.now + .seconds(1)
+        processes.forEach { $0.finishStop(by: deadline) }
     }
 
     private func openTunnel(_ script: PreConnectScript, host: String, port: Int, owner: UUID) async throws {
         let endpoint = "\(host):\(port)"
         if await probe.isOpen(host: host, port: port) {
             tunnels[endpoint]?.owners.insert(owner)
-            listener?(TunnelEvent(kind: .alreadyOpen, endpoint: endpoint))
             return
         }
         let process = try reuseOrLaunch(script, endpoint: endpoint, owner: owner)
         let deadline = ContinuousClock.now + .seconds(script.timeoutSeconds)
         while ContinuousClock.now < deadline {
             if await probe.isOpen(host: host, port: port) {
-                listener?(TunnelEvent(kind: .ready, endpoint: endpoint))
                 return
             }
             // A script that exits 0 may have started the tunnel in background: keep probing.
@@ -108,7 +109,6 @@ public actor TunnelManager {
         }
         let process = try launcher.launch(script.script)
         tunnels[endpoint] = Tunnel(process: process, owners: [owner])
-        listener?(TunnelEvent(kind: .started, endpoint: endpoint))
         return process
     }
 

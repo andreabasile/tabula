@@ -8,6 +8,8 @@ public protocol DatabaseClient: Sendable {
     func executeInTransaction(_ statements: [String]) async throws
     /// Asks the server to stop the running statement; safe to call from any thread.
     func cancel()
+    /// True inside a transaction the user opened (BEGIN without COMMIT/ROLLBACK yet).
+    func isInTransaction() async -> Bool
     func serverInfo() async -> ServerInfo
     func close() async
 }
@@ -55,6 +57,8 @@ extension DatabaseClient {
     }
 
     public func cancel() {}
+
+    public func isInTransaction() async -> Bool { false }
 
     public func serverInfo() async -> ServerInfo { ServerInfo() }
 }

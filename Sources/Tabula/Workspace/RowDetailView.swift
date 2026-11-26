@@ -8,7 +8,7 @@ struct RowDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TextField("Cerca campo…", text: $search)
+            TextField("Search field…", text: $search)
                 .textFieldStyle(.roundedBorder)
                 .padding(8)
             if let row = selectedRow {
@@ -26,7 +26,7 @@ struct RowDetailView: View {
                 }
                 .id("\(table.id)-\(row)-\(table.revision)")
             } else {
-                Text(table.selectedRows.count > 1 ? "\(table.selectedRows.count) righe selezionate" : "Nessuna riga selezionata")
+                Text(table.selectedRows.count > 1 ? "\(table.selectedRows.count) rows selected" : "No row selected")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -60,9 +60,9 @@ private struct FieldEditor: View {
                 Text(column.typeName).font(.caption2).foregroundStyle(.tertiary)
                 Spacer()
                 Menu {
-                    Button("NULL") { onCommit(.null) }
-                    Button("DEFAULT") { onCommit(.defaultValue) }
-                    Button("Stringa vuota") { onCommit(.text("")) }
+                    Button(CellValue.null.displayText) { onCommit(.null) }
+                    Button(CellValue.defaultValue.displayText) { onCommit(.defaultValue) }
+                    Button("Empty string") { onCommit(.text("")) }
                 } label: {
                     Text(value.textValue == nil ? value.displayText : "").font(.caption2)
                 }
@@ -70,7 +70,7 @@ private struct FieldEditor: View {
                 .fixedSize()
                 .disabled(!isEditable)
             }
-            TextField("", text: $text, prompt: Text(value.displayText), axis: .vertical)
+            TextField(column.name, text: $text, prompt: Text(value.displayText), axis: .vertical)
                 .font(.system(.callout, design: .monospaced))
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...8)

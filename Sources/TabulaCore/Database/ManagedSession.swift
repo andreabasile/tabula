@@ -11,6 +11,8 @@ public actor ManagedSession {
     private var client: DatabaseClient?
     private var opening: Task<DatabaseClient, Error>?
     private var hasConnectedBefore = false
+    /// Set by close(): late queries (e.g. from a window being closed) must not reopen the session.
+    private var isClosed = false
     private var status = ConnectionStatus()
     private var statusListener: (@Sendable (ConnectionStatus) -> Void)?
 
@@ -32,15 +34,17 @@ public actor ManagedSession {
     }
 
     public func connect() async throws {
+        isClosed = false
         _ = try await activeClient()
     }
 
     public func execute(_ sql: String) async throws -> QueryResult {
-        try await withReconnect(retrySafe: StatementClassifier.isReadOnly(sql)) { try await $0.execute(sql) }
+        try await withReconnect(retrySafe: isRetrySafe(sql)) { try await $0.execute(sql) }
     }
 
     /// Streams rows; a dropped connection is retried only for reads that delivered nothing yet.
     public func stream(_ sql: String, chunkSize: Int = 500, onChunk: @escaping @Sendable (ResultChunk) -> Void) async throws -> StreamSummary {
+        let retrySafe = await isRetrySafe(sql)
         let delivered = DeliveryFlag()
         let tracking: @Sendable (ResultChunk) -> Void = { chunk in
             delivered.mark()
@@ -48,13 +52,14 @@ public actor ManagedSession {
         }
         do {
             return try await withReconnect(retrySafe: false) { try await $0.stream(sql, chunkSize: chunkSize, onChunk: tracking) }
-        } catch let error as DatabaseError where error.isConnectionLevel && !delivered.value && StatementClassifier.isReadOnly(sql) {
+        } catch let error as DatabaseError where error.isConnectionLevel && !delivered.value && retrySafe {
             return try await activeClient().stream(sql, chunkSize: chunkSize, onChunk: tracking)
         }
     }
 
     /// Stops the statement currently running on this session, if any.
     public func cancelRunningQuery() {
+        // shortcut: PQcancel blocks this actor until the server answers, so the window's other queries wait briefly; call it off the actor if that delay shows.
         client?.cancel()
     }
 
@@ -65,12 +70,14 @@ public actor ManagedSession {
 
     /// Forces a new connection (and a new token), like TablePlus's "Reconnect".
     public func reconnect() async throws {
+        isClosed = false
         await dropConnection()
         await credentialsProvider.invalidate()
         _ = try await activeClient()
     }
 
     public func close() async {
+        isClosed = true
         await dropConnection()
         status.openedAt = nil
         publish()
@@ -90,8 +97,14 @@ public actor ManagedSession {
     }
 
     private func activeClient() async throws -> DatabaseClient {
-        if let client, let openedAt = status.openedAt, !lifetime.shouldRecycle(openedAt: openedAt, now: now()) {
-            return client
+        guard !isClosed else { throw Self.closedError }
+        if let client, let openedAt = status.openedAt {
+            if !lifetime.shouldRecycle(openedAt: openedAt, now: now()) { return client }
+            // Recycling now would silently roll back the transaction the user has open.
+            if await client.isInTransaction() {
+                guard !isClosed else { throw Self.closedError }
+                return client
+            }
         }
         // Concurrent callers share one connect instead of racing to open several.
         if let opening { return try await opening.value }
@@ -104,6 +117,11 @@ public actor ManagedSession {
     private func openFreshClient() async throws -> DatabaseClient {
         await dropConnection()
         let (opened, credentials) = try await openWithFreshTokenOnAuthFailure()
+        // close() may have run while the token or the connection was on its way.
+        guard !isClosed else {
+            await opened.close()
+            throw Self.closedError
+        }
         client = opened
         status.openedAt = now()
         status.tokenIssuedAt = credentials.token?.issuedAt
@@ -125,6 +143,17 @@ public actor ManagedSession {
             let fresh = try await credentialsProvider.credentials()
             return (try await opener.open(fresh), fresh)
         }
+    }
+
+    /// Only reads are replayed after a dropped connection, and not inside a transaction:
+    /// on a new connection they would run outside the user's open transaction.
+    private func isRetrySafe(_ sql: String) async -> Bool {
+        guard StatementClassifier.isReadOnly(sql) else { return false }
+        return !(await client?.isInTransaction() ?? false)
+    }
+
+    private static var closedError: DatabaseError {
+        .connectionLost(String(localized: "the session was closed"))
     }
 
     private func dropConnection() async {

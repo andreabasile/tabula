@@ -9,12 +9,12 @@ struct TabulaApp: App {
 
     init() {
         let model = AppModel()
-        AppDelegate.tunnels = model.sessionFactory.tunnels
+        AppDelegate.model = model
         _model = State(initialValue: model)
     }
 
     var body: some Scene {
-        Window("Benvenuto in Tabula", id: WindowID.welcome) {
+        Window("Welcome to Tabula", id: WindowID.welcome) {
             WelcomeView()
                 .environment(model)
         }
@@ -22,7 +22,7 @@ struct TabulaApp: App {
         .defaultSize(width: 760, height: 460)
 
         // One window for every open connection, switched from the left rail as in TablePlus.
-        Window("Tabula", id: WindowID.workspace) {
+        Window(Text(verbatim: "Tabula"), id: WindowID.workspace) {
             WorkspaceShell()
                 .environment(model)
         }
@@ -54,16 +54,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func terminateGracefullyOnSIGTERM() {
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        source.setEventHandler { NSApp.terminate(nil) }
+        // The source fires on the main queue.
+        source.setEventHandler {
+            MainActor.assumeIsolated {
+                // Nobody may be there to answer a prompt (pkill, scripts): quit without asking.
+                Self.isQuittingFromSignal = true
+                NSApp.terminate(nil)
+            }
+        }
         source.resume()
         signalSource = source
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Quitting would drop grid edits not saved with ⌘S: ask first.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !Self.isQuittingFromSignal, Self.model?.workspaces.contains(where: \.hasUnsavedChanges) == true else { return .terminateNow }
+        return UnsavedChanges.confirmDiscard() ? .terminateNow : .terminateCancel
+    }
+
     /// Tunnels started by Tabula must not outlive it.
     func applicationWillTerminate(_ notification: Notification) {
-        guard let tunnels = Self.tunnels else { return }
+        guard let tunnels = Self.model?.sessionFactory.tunnels else { return }
         let semaphore = DispatchSemaphore(value: 0)
         Task.detached {
             await tunnels.releaseAll()
@@ -72,5 +85,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = semaphore.wait(timeout: .now() + 2)
     }
 
-    nonisolated(unsafe) static var tunnels: TunnelManager?
+    @MainActor static var model: AppModel?
+    @MainActor private static var isQuittingFromSignal = false
 }

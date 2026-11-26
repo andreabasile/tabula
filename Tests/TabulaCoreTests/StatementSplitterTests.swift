@@ -28,6 +28,11 @@ struct StatementSplitterTests {
         #expect(StatementSplitter.split("SELECT 'it''s; fine'; SELECT 2").count == 2)
     }
 
+    @Test func backslashEscapesOnlyInsideEStrings() {
+        #expect(StatementSplitter.split(#"SELECT E'it\'s; ok'; SELECT 2"#).map(\.text) == [#"SELECT E'it\'s; ok'"#, "SELECT 2"])
+        #expect(StatementSplitter.split(#"SELECT 'C:\'; SELECT 2"#).count == 2)
+    }
+
     @Test func dropsCommentOnlyFragments() {
         #expect(StatementSplitter.split("SELECT 1; -- nothing else").map(\.text) == ["SELECT 1"])
     }
@@ -72,12 +77,27 @@ struct StatementClassifierTests {
         #expect(StatementClassifier.isReadOnly("  -- note\n EXPLAIN SELECT 1"))
         #expect(StatementClassifier.isReadOnly("(SELECT 1) UNION (SELECT 2)"))
         #expect(StatementClassifier.isReadOnly("WITH x AS (SELECT 1) SELECT * FROM x"))
+        #expect(StatementClassifier.isReadOnly("EXPLAIN ANALYZE SELECT * FROM t"))
+        #expect(StatementClassifier.isReadOnly("EXPLAIN DELETE FROM t"))
+        #expect(StatementClassifier.isReadOnly("SELECT insert_date FROM update_log"))
+        #expect(StatementClassifier.isReadOnly("SELECT * FROM notes WHERE note = 'look into it'"))
+        #expect(StatementClassifier.isReadOnly("EXPLAIN (ANALYZE, BUFFERS) SELECT 1"))
+        #expect(StatementClassifier.isReadOnly("SELECT * FROM big FOR UPDATE"))
+        #expect(StatementClassifier.isReadOnly("SELECT * FROM big FOR NO KEY UPDATE SKIP LOCKED"))
+        #expect(StatementClassifier.isReadOnly("SELECT update, delete FROM audit"))
     }
 
     @Test func writeStatements() {
         #expect(!StatementClassifier.isReadOnly("UPDATE t SET a = 1"))
         #expect(!StatementClassifier.isReadOnly("WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d"))
         #expect(!StatementClassifier.isReadOnly("drop table t"))
+        #expect(!StatementClassifier.isReadOnly("EXPLAIN ANALYZE DELETE FROM t"))
+        #expect(!StatementClassifier.isReadOnly("SELECT * INTO backup FROM t"))
+        #expect(!StatementClassifier.isReadOnly("EXPLAIN ANALYZE CREATE TABLE x AS SELECT * FROM t"))
+        #expect(!StatementClassifier.isReadOnly("EXPLAIN ANALYZE CREATE MATERIALIZED VIEW v AS SELECT 1"))
+        #expect(!StatementClassifier.isReadOnly("EXPLAIN ANALYZE EXECUTE p(1)"))
+        #expect(!StatementClassifier.isReadOnly("EXPLAIN (ANALYZE, BUFFERS) UPDATE t SET a = 1"))
+        #expect(!StatementClassifier.isReadOnly("WITH x AS (SELECT 1) UPDATE t SET a = 1"))
     }
 
     @Test func safeModeAsksOnlyWhenNeeded() {

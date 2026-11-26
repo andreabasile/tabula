@@ -1,81 +1,72 @@
 # Tabula
 
-Client database per macOS sul modello di TablePlus, per PostgreSQL e Amazon Aurora DSQL.
-Con DSQL la password è un token IAM generato con la AWS CLI e le credenziali locali del
-profilo scelto (SSO, assume-role, chiavi): Tabula lo rinnova da sola e ricrea la connessione
-prima del limite di 60 minuti di DSQL o quando il server la chiude.
+A macOS database client modeled on TablePlus, for PostgreSQL and Amazon Aurora DSQL.
+The interface is available in English, Italian, French and German and follows the macOS system language.
 
-## Installazione
+With DSQL the password is an IAM token generated with the AWS CLI and the local credentials
+of the chosen profile (SSO, assume-role, keys). Tabula renews it on its own and recreates the
+connection before DSQL's 60-minute limit or when the server closes it.
+
+## Installation
 
 ```bash
 brew install --cask andreabasile/tap/tabula
 ```
 
-Solo Apple Silicon, macOS 15+. L'app ha una firma ad-hoc e non è notarizzata: il cask le toglie la quarantena
-dopo l'installazione, altrimenti Gatekeeper ne bloccherebbe l'apertura.
+Apple Silicon only, macOS 15+. The app is ad-hoc signed and not notarized: the cask removes the
+quarantine attribute after installation, otherwise Gatekeeper would block it from opening.
+libpq is bundled in the app. Aurora DSQL connections need the AWS CLI v2 (for example
+`/opt/homebrew/bin/aws` or `/usr/local/bin/aws`).
 
-## Sviluppo
+## How the DSQL token works
 
+- `CachedTokenProvider` reuses the token until less than a minute remains before it expires;
+  the token is only needed to open the connection, which then stays valid.
+- `ManagedSession` recreates the connection after 55 minutes (like the AWS connectors),
+  and when it drops: reads are retried, writes are not.
+- If DSQL rejects a cached token, it generates a new one and retries once.
+- The status bar shows the token's validity, how long the connection has been open,
+  and how many reconnections have occurred; "Reconnect" (⇧⌘R) forces a new token and connection.
 
-- macOS 15+, Swift 6
-- `brew install libpq` (per compilare; l'app finale include libpq nel bundle)
-- AWS CLI v2 per le connessioni DSQL (`/opt/homebrew/bin/aws` o `/usr/local/bin/aws`)
+## Pre-connection script (tunnel)
 
-## Comandi
+Each connection can have a script, saved with it, that Tabula runs in a zsh login shell before
+connecting, for example `bash ~/scripts/db-tunnel-prod.sh` for an SSM tunnel.
 
-```bash
-swift test                       # test del nucleo
-swift run Tabula                 # avvio in sviluppo
-./scripts/build-app.sh           # build/Tabula.app firmata
-./scripts/build-app.sh --install # copia in /Applications e apre
-./scripts/release.sh 1.0.1       # tag v1.0.1: la GitHub Action pubblica il DMG e aggiorna il cask
-```
+- "Opens a tunnel" (default): the script may keep running; Tabula only launches it if
+  host:port is not already responding, waits for it to respond (30 s by default), relaunches it
+  when the tunnel drops and the connection must be recreated, and kills the whole process tree
+  when the last window using it closes or when the app quits. Connections on the same port share the tunnel.
+- Otherwise the script must exit successfully on every connection (e.g. `aws sso login`).
 
-Avvio diretto su connessioni salvate: `Tabula --connect "<nome>" [--connect "<altra>"] [--table <tabella>]`.
-Con `TABULA_SNAPSHOT_DIR=<cartella>` l'app salva ogni 3 secondi un PNG delle sue finestre
-(serve a verificare l'interfaccia senza permessi di registrazione schermo).
+If it fails, the error shows the last lines of its output. The TablePlus import carries over
+their `StartupBashScript`.
 
-## Come funziona il token DSQL
+## Import from TablePlus
 
-- `CachedTokenProvider` riusa il token finché manca più di un minuto alla scadenza;
-  il token serve solo ad aprire la connessione, che poi resta valida.
-- `ManagedSession` ricrea la connessione dopo 55 minuti (come i connettori AWS),
-  e quando cade: le letture vengono ripetute, le scritture no.
-- Se DSQL rifiuta un token in cache, ne genera uno nuovo e riprova una volta.
-- La barra di stato mostra la validità del token, da quanto è aperta la connessione
-  e quante riconnessioni ci sono state; "Riconnetti" (⇧⌘R) forza token e connessione nuovi.
+"Import from TablePlus…" in the welcome window reads the file from File › Export Connections
+(encrypted with RNCryptor v3 using the password chosen at export), shows a preview, and imports groups,
+tags, SSL, safe mode and passwords (into the Keychain). Connections that already exist, with the same
+host/port/user/database, are left unselected.
 
-## Script prima della connessione (tunnel)
+## Multiple connections
 
-Ogni connessione può avere uno script, salvato con lei, che Tabula lancia in una shell di
-login zsh prima di collegarsi, ad esempio `bash ~/scripts/db-tunnel-prod.sh` per un tunnel SSM.
+As in TablePlus, open connections sit in the column on the left of the window, with the
+icon colored by tag; ⌘K opens another one, ⌘1…⌘9 switch between them.
+For PostgreSQL, ⌘D switches database on the same server. The box in the middle of the toolbar is
+colored by tag; clicking it shows host, user, token and the Reconnect/Disconnect buttons.
 
-- "Apre un tunnel" (predefinito): lo script può restare attivo; Tabula lo lancia solo se
-  host:porta non risponde già, attende che risponda (30 s di default), lo rilancia quando il
-  tunnel cade e la connessione va ricreata, e chiude l'intero albero dei processi con l'ultima
-  finestra che lo usa o all'uscita dall'app. Connessioni sulla stessa porta condividono il tunnel.
-- Altrimenti lo script deve terminare con successo a ogni connessione (es. `aws sso login`).
+## Shortcuts
 
-Se fallisce, l'errore mostra le ultime righe del suo output. L'import da TablePlus porta con sé
-il loro `StartupBashScript`.
+⌘K open connection · ⌘1…⌘9 switch connection · ⌘D open database · ⇧⌘0 manage connections · ⌘T new query ·
+⌘↩ run current statement or selection · ⇧⌘↩ run all · ⌘S save changes · ⌘F filters ·
+⌘P find table · ⌘R refresh · ⇧⌘R reconnect · ⇧⌘C console · ⌘] row detail
 
-## Import da TablePlus
+## Development
 
-"Importa da TablePlus…" nella finestra di benvenuto legge il file di File › Export Connections
-(cifrato RNCryptor v3 con la password scelta all'export), mostra l'anteprima e importa gruppi,
-tag, SSL, modalità sicura e password (nel Portachiavi). Le connessioni già presenti, stesso
-host/porta/utente/database, restano deselezionate. Da terminale:
-`TABULA_IMPORT_FILE=<file> TABULA_IMPORT_PASSWORD=<pw> Tabula`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for requirements, build and test commands, development hooks
+and known limitations. Security issues: [SECURITY.md](SECURITY.md).
 
-## Più connessioni
+## License
 
-Come in TablePlus le connessioni aperte stanno nella colonna a sinistra della finestra, con
-l'icona colorata secondo il tag; ⌘K ne apre un'altra, ⌘1…⌘9 passano dall'una all'altra.
-Per PostgreSQL ⌘D cambia database sullo stesso server. Il riquadro al centro della barra è
-colorato secondo il tag; cliccandolo si vedono host, utente, token e i pulsanti Riconnetti/Disconnetti.
-
-## Scorciatoie
-
-⌘K apri connessione · ⌘1…⌘9 cambia connessione · ⌘D apri database · ⇧⌘0 gestisci connessioni · ⌘T nuova query ·
-⌘↩ esegui statement corrente o selezione · ⇧⌘↩ esegui tutto · ⌘S salva modifiche · ⌘F filtri ·
-⌘P cerca tabella · ⌘R aggiorna · ⇧⌘R riconnetti · ⇧⌘C console · ⌘] dettaglio riga
+[MIT](LICENSE)

@@ -97,6 +97,7 @@ struct PreConnectScriptStorageTests {
         let json = #"[{"Name":"g","connections":[{"ConnectionName":"p","Driver":"PostgreSQL","DatabaseHost":"127.0.0.1","DatabasePort":15432,"StartupBashScript":"bash tunnel.sh"}],"groups":[]}]"#
         let imported = try TablePlusImporter.parse(json: Data(json.utf8))
         #expect(imported.connections.first?.connection.preConnectScript == PreConnectScript(script: "bash tunnel.sh"))
+        #expect(imported.connections.first?.warnings.contains { $0.contains("bash tunnel.sh") } == true)
     }
 }
 
@@ -135,7 +136,8 @@ final class FakeProcess: RunningScript, @unchecked Sendable {
 
     var isRunning: Bool { lock.withLock { running } }
     var exitCode: Int32? { lock.withLock { running ? nil : (code ?? 15) } }
-    func terminate() { lock.withLock { running = false } }
+    func requestStop() { lock.withLock { running = false } }
+    func finishStop(by deadline: ContinuousClock.Instant) {}
 }
 
 final class FakeLauncher: ScriptLaunching, @unchecked Sendable {
@@ -199,6 +201,64 @@ struct TunnelProcessGroupTests {
         await manager.release(owner: owner)
         try await Task.sleep(for: .milliseconds(500))
         #expect(await TCPPortProbe().isOpen(host: "127.0.0.1", port: port) == false)
+    }
+}
+
+struct ShellProcessTests {
+    /// Quitting cannot wait for a deferred kill: a script that ignores SIGTERM is killed before terminate() returns.
+    @Test func terminateKillsScriptsThatIgnoreSIGTERM() async throws {
+        let process = try ShellProcess(script: "trap '' TERM; sleep 30")
+        try await Task.sleep(for: .milliseconds(300))
+        process.terminate()
+        for _ in 0..<50 where kill(-process.processGroup, 0) == 0 {
+            _ = process.exitCode
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(kill(-process.processGroup, 0) != 0)
+    }
+}
+
+struct TunnelShutdownTests {
+    /// At quit the app waits 2 s: tunnels that ignore SIGTERM must share one grace period, not get one each.
+    @Test func releaseAllStopsStubbornTunnelsTogether() async throws {
+        let launcher = RecordingLauncher()
+        let manager = TunnelManager(launcher: launcher, probe: OpensAfterLaunchProbe(), pollInterval: .milliseconds(10))
+        let script = PreConnectScript(script: "trap '' TERM; sleep 30", waitsForPort: true, timeoutSeconds: 5)
+        try await manager.prepare(script, host: "127.0.0.1", port: 1, owner: UUID())
+        try await manager.prepare(script, host: "127.0.0.1", port: 2, owner: UUID())
+        try await Task.sleep(for: .milliseconds(300))
+        let started = ContinuousClock.now
+        await manager.releaseAll()
+        #expect(ContinuousClock.now - started < .milliseconds(1700))
+        for process in launcher.processes {
+            for _ in 0..<50 where kill(-process.processGroup, 0) == 0 {
+                _ = process.exitCode
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(kill(-process.processGroup, 0) != 0)
+        }
+    }
+}
+
+/// Closed on the first check of each port, open from the second: every prepare launches its script.
+final class OpensAfterLaunchProbe: PortProbing, @unchecked Sendable {
+    private let lock = NSLock()
+    private var checked: Set<Int> = []
+
+    func isOpen(host: String, port: Int) async -> Bool {
+        lock.withLock { !checked.insert(port).inserted }
+    }
+}
+
+final class RecordingLauncher: ScriptLaunching, @unchecked Sendable {
+    private let lock = NSLock()
+    private var started: [ShellProcess] = []
+    var processes: [ShellProcess] { lock.withLock { started } }
+
+    func launch(_ script: String) throws -> RunningScript {
+        let process = try ShellProcess(script: script)
+        lock.withLock { started.append(process) }
+        return process
     }
 }
 

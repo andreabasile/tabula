@@ -16,6 +16,19 @@ public enum FilterOperator: String, CaseIterable, Codable, Sendable {
     case inList = "in"
 
     public var needsValue: Bool { self != .isNull && self != .isNotNull }
+
+    public var title: String {
+        switch self {
+        case .contains: String(localized: "contains")
+        case .notContains: String(localized: "not contains")
+        case .hasPrefix: String(localized: "has prefix")
+        case .hasSuffix: String(localized: "has suffix")
+        case .isNull: String(localized: "is null")
+        case .isNotNull: String(localized: "is not null")
+        case .inList: String(localized: "in")
+        case .equals, .notEquals, .less, .greater, .lessOrEqual, .greaterOrEqual: rawValue
+        }
+    }
 }
 
 public struct ColumnFilter: Equatable, Codable, Sendable {
@@ -65,7 +78,7 @@ public struct ColumnFilter: Equatable, Codable, Sendable {
     }
 }
 
-public struct SortOrder: Equatable, Codable, Sendable {
+public struct ColumnSort: Equatable, Codable, Sendable {
     public var column: String
     public var ascending: Bool
 
@@ -80,11 +93,11 @@ public struct TableQuery: Equatable, Sendable {
 
     public var table: TableReference
     public var filters: [ColumnFilter]
-    public var sort: SortOrder?
+    public var sort: ColumnSort?
     public var page: Int
     public var pageSize: Int
 
-    public init(table: TableReference, filters: [ColumnFilter] = [], sort: SortOrder? = nil, page: Int = 0, pageSize: Int = TableQuery.defaultPageSize) {
+    public init(table: TableReference, filters: [ColumnFilter] = [], sort: ColumnSort? = nil, page: Int = 0, pageSize: Int = TableQuery.defaultPageSize) {
         self.table = table
         self.filters = filters
         self.sort = sort

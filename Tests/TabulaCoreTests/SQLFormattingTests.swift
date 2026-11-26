@@ -12,6 +12,10 @@ struct QueryLimitTests {
         #expect(QueryLimit.apply(300, to: "SELECT * FROM t FETCH FIRST 5 ROWS ONLY") == "SELECT * FROM t FETCH FIRST 5 ROWS ONLY")
     }
 
+    @Test func lockingReadsStillGetTheLimit() {
+        #expect(QueryLimit.apply(100, to: "SELECT * FROM big FOR UPDATE") == "SELECT * FROM big FOR UPDATE\nLIMIT 100")
+    }
+
     @Test func limitInsideSubqueryDoesNotCount() {
         #expect(QueryLimit.apply(100, to: "SELECT * FROM (SELECT * FROM t LIMIT 5) x") == "SELECT * FROM (SELECT * FROM t LIMIT 5) x\nLIMIT 100")
     }
@@ -47,6 +51,17 @@ struct SQLBeautifierTests {
             FROM t
             GROUP BY 2
             """)
+    }
+
+    @Test func lineCommentsNeverSwallowWhatFollows() {
+        #expect(SQLBeautifier.format("SELECT a -- first\n, b FROM t") == "SELECT\n  a -- first\n,\n  b\nFROM t")
+        #expect(SQLBeautifier.format("UPDATE t SET a = 1 WHERE -- only this row\n id = 5") == "UPDATE t\nSET a = 1\nWHERE -- only this row\n  id = 5")
+    }
+
+    @Test func blockCommentsAndDollarQuotesStayVerbatim() {
+        #expect(SQLBeautifier.format("SELECT 'x' /* don't */ , b FROM t") == "SELECT\n  'x' /* don't */,\n  b\nFROM t")
+        #expect(SQLBeautifier.format("SELECT $$select and from$$ AS x") == "SELECT\n  $$select and from$$ AS x")
+        #expect(SQLBeautifier.format(#"SELECT E'a\'b' AS x"#) == "SELECT\n  E'a\\'b' AS x")
     }
 }
 

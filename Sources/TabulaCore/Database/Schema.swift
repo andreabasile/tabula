@@ -1,5 +1,17 @@
 import Foundation
 
+public struct TableReference: Equatable, Hashable, Sendable {
+    public let schema: String
+    public let name: String
+
+    public init(schema: String, name: String) {
+        self.schema = schema
+        self.name = name
+    }
+
+    public var qualifiedName: String { SQLRendering.qualified(schema: schema, table: name) }
+}
+
 public enum TableKind: String, Sendable {
     case table, view, materializedView
 

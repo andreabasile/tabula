@@ -13,7 +13,15 @@ extension ConnectionTag {
         }
     }
 
-    var title: String { rawValue }
+    var title: String {
+        switch self {
+        case .local: String(localized: "local")
+        case .testing: String(localized: "testing")
+        case .development: String(localized: "development")
+        case .staging: String(localized: "staging")
+        case .production: String(localized: "production")
+        }
+    }
 }
 
 struct TagBadge: View {
@@ -36,16 +44,11 @@ struct DriverIcon: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: size * 0.22)
-                .fill(isDSQL ? Color(red: 0.55, green: 0.32, blue: 0.85) : Color(red: 0.20, green: 0.40, blue: 0.62))
-            Text(isDSQL ? "DS" : "Pg")
+                .fill(kind.isDSQL ? Color(red: 0.55, green: 0.32, blue: 0.85) : Color(red: 0.20, green: 0.40, blue: 0.62))
+            Text(verbatim: kind.isDSQL ? "DS" : "Pg")
                 .font(.system(size: size * 0.4, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
         }
         .frame(width: size, height: size)
-    }
-
-    private var isDSQL: Bool {
-        if case .dsql = kind { return true }
-        return false
     }
 }

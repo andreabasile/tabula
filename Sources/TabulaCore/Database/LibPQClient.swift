@@ -31,7 +31,7 @@ public final class LibPQClient: DatabaseClient, @unchecked Sendable {
             let connection = parameters.withCStrings { keywords, values in
                 PQconnectdbParams(keywords, values, 0)
             }
-            guard let connection else { throw DatabaseError.connectionLost("libpq non ha allocato la connessione") }
+            guard let connection else { throw DatabaseError.connectionLost(String(localized: "libpq failed to allocate the connection")) }
             guard PQstatus(connection) == CONNECTION_OK else {
                 let message = String(cString: PQerrorMessage(connection)).trimmingCharacters(in: .whitespacesAndNewlines)
                 PQfinish(connection)
@@ -48,9 +48,15 @@ public final class LibPQClient: DatabaseClient, @unchecked Sendable {
 
     public func executeInTransaction(_ statements: [String]) async throws {
         try await Self.perform(on: queue) { [self] in
+            try checkCanCommitEdits()
             _ = try runQuery("BEGIN")
             do {
-                for statement in statements { _ = try runQuery(statement) }
+                for statement in statements {
+                    // The row changed or vanished since it was read, or a row-level security policy hides it.
+                    if LibPQErrors.matchedNoRow(try runQuery(statement).commandTag) {
+                        throw DatabaseError.other(String(localized: "A row to save no longer matches: it was changed or deleted in the meantime, or a security policy hides it. Nothing was saved."))
+                    }
+                }
                 _ = try runQuery("COMMIT")
             } catch {
                 _ = try? runQuery("ROLLBACK")
@@ -61,6 +67,14 @@ public final class LibPQClient: DatabaseClient, @unchecked Sendable {
 
     public func stream(_ sql: String, chunkSize: Int, onChunk: @escaping @Sendable (ResultChunk) -> Void) async throws -> StreamSummary {
         try await Self.perform(on: queue) { [self] in try runStreaming(sql, chunkSize: chunkSize, onChunk: onChunk) }
+    }
+
+    public func isInTransaction() async -> Bool {
+        (try? await Self.perform(on: queue) { [self] in
+            guard !isClosed else { return false }
+            let status = PQtransactionStatus(connection)
+            return status == PQTRANS_INTRANS || status == PQTRANS_INERROR
+        }) ?? false
     }
 
     public func serverInfo() async -> ServerInfo {
@@ -100,8 +114,20 @@ public final class LibPQClient: DatabaseClient, @unchecked Sendable {
         PQfinish(connection)
     }
 
+    /// Edits are plain SQL sent on the session the user also types into.
+    private func checkCanCommitEdits() throws {
+        // Our BEGIN would only warn inside the user's own transaction, and our COMMIT would end it.
+        guard PQtransactionStatus(connection) == PQTRANS_IDLE else {
+            throw DatabaseError.other(String(localized: "A transaction is open in this session: commit or roll it back before saving edits."))
+        }
+        // Values are quoted by doubling quotes only; with backslash escapes they could be corrupted.
+        if PQparameterStatus(connection, "standard_conforming_strings").map({ String(cString: $0) }) == "off" {
+            throw DatabaseError.other(String(localized: "Editing is disabled: this server treats backslashes in strings as escapes (standard_conforming_strings is off)."))
+        }
+    }
+
     private func runQuery(_ sql: String) throws -> QueryResult {
-        guard !isClosed else { throw DatabaseError.connectionLost("connessione chiusa") }
+        guard !isClosed else { throw DatabaseError.connectionLost(String(localized: "connection closed")) }
         let started = Date()
         guard PQsendQuery(connection, sql) == 1 else { throw connectionLevelError() }
         var last: QueryResult?
@@ -123,7 +149,7 @@ public final class LibPQClient: DatabaseClient, @unchecked Sendable {
     }
 
     private func runStreaming(_ sql: String, chunkSize: Int, onChunk: (ResultChunk) -> Void) throws -> StreamSummary {
-        guard !isClosed else { throw DatabaseError.connectionLost("connessione chiusa") }
+        guard !isClosed else { throw DatabaseError.connectionLost(String(localized: "connection closed")) }
         let started = Date()
         guard PQsendQuery(connection, sql) == 1 else { throw connectionLevelError() }
         PQsetChunkedRowsMode(connection, Int32(max(chunkSize, 1)))
@@ -175,7 +201,7 @@ public final class LibPQClient: DatabaseClient, @unchecked Sendable {
 
     private func connectionLevelError() -> DatabaseError {
         let message = String(cString: PQerrorMessage(connection)).trimmingCharacters(in: .whitespacesAndNewlines)
-        return .connectionLost(message.isEmpty ? "il server ha chiuso la connessione" : message)
+        return .connectionLost(message.isEmpty ? String(localized: "the server closed the connection") : message)
     }
 
     private static func perform<T: Sendable>(on queue: DispatchQueue, _ work: @escaping @Sendable () throws -> T) async throws -> T {
@@ -191,6 +217,11 @@ enum LibPQErrors {
         let isAuthentication = ["password authentication failed", "access denied", "authentication failed"]
             .contains { lowered.contains($0) }
         return isAuthentication ? .authenticationFailed(message) : .connectionLost(message)
+    }
+
+    /// The command tag of an UPDATE or DELETE that changed nothing.
+    static func matchedNoRow(_ commandTag: String) -> Bool {
+        commandTag == "UPDATE 0" || commandTag == "DELETE 0"
     }
 }
 
@@ -212,13 +243,10 @@ struct LibPQParameters {
     }
 
     private static func sslPairs(for credentials: ConnectionCredentials) -> [(String, String)] {
-        // DSQL presents a publicly trusted certificate, so it can be fully verified.
-        if credentials.token != nil { return [("sslmode", "verify-full"), ("sslrootcert", "system")] }
-        switch credentials.sslMode {
-        case .disabled: return [("sslmode", "disable")]
-        case .preferred: return [("sslmode", "prefer")]
-        case .required: return [("sslmode", "require")]
-        }
+        // DSQL presents a publicly trusted certificate, so it can be fully verified. Not "system": the
+        // bundled OpenSSL's default store points into Homebrew; macOS keeps its CA bundle at /etc/ssl/cert.pem.
+        if credentials.token != nil { return [("sslmode", "verify-full"), ("sslrootcert", "/etc/ssl/cert.pem")] }
+        return [("sslmode", credentials.sslMode.libpqName)]
     }
 
     func withCStrings<T>(_ body: (UnsafePointer<UnsafePointer<CChar>?>, UnsafePointer<UnsafePointer<CChar>?>) -> T) -> T {

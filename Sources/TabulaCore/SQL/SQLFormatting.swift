@@ -18,7 +18,7 @@ public enum QueryLimit {
     private static func hasTopLevelLimit(_ sql: String) -> Bool {
         var depth = 0
         var previous = ""
-        for token in SQLTokens.split(StatementSplitter.strippingComments(sql)) {
+        for token in SQLTokens.split(sql) where token.kind != .comment {
             if token.text == "(" { depth += 1 }
             if token.text == ")" { depth -= 1 }
             let word = token.text.lowercased()
@@ -60,7 +60,7 @@ public enum SQLBeautifier {
             let token = tokens[index]
             let lowered = token.text.lowercased()
             if depth == 0, let clause = clause(at: index, in: tokens) {
-                if !output.isEmpty { output = output.trimmingTrailingSpaces() + "\n" }
+                if !output.isEmpty { output = output.endingLine() }
                 output += clause.map { $0.uppercased() }.joined(separator: " ")
                 inSelectList = clause == ["select"]
                 output += inSelectList ? "\n  " : " "
@@ -80,7 +80,10 @@ public enum SQLBeautifier {
                 output = output.trimmingTrailingSpaces() + "."
             default:
                 if depth == 0, lowered == "and" || lowered == "or" {
-                    output = output.trimmingTrailingSpaces() + "\n  " + lowered.uppercased() + " "
+                    output = output.endingLine() + "  " + lowered.uppercased() + " "
+                } else if token.kind == .comment, token.text.hasPrefix("--") {
+                    // A line comment runs to the end of the line: what follows must start a new one.
+                    output += token.text + "\n  "
                 } else {
                     let text = token.kind == .word && keywords.contains(lowered) ? lowered.uppercased() : token.text
                     output += text + (tokens.indices.contains(index + 1) && tokens[index + 1].text == "(" && token.kind == .word ? "" : " ")
@@ -106,59 +109,10 @@ private extension String {
         while copy.last == " " { copy.removeLast() }
         return copy
     }
-}
 
-/// A small lexer shared by the formatter and the limit check.
-enum SQLTokens {
-    struct Token {
-        enum Kind { case word, string, quoted, number, symbol, comment }
-        let text: String
-        let kind: Kind
-    }
-
-    static func split(_ sql: String) -> [Token] {
-        var tokens: [Token] = []
-        let characters = Array(sql)
-        var index = 0
-        while index < characters.count {
-            let character = characters[index]
-            if character.isWhitespace {
-                index += 1
-            } else if character == "-", index + 1 < characters.count, characters[index + 1] == "-" {
-                let start = index
-                while index < characters.count, characters[index] != "\n" { index += 1 }
-                tokens.append(Token(text: String(characters[start..<index]), kind: .comment))
-            } else if character == "'" || character == "\"" {
-                let start = index
-                index += 1
-                while index < characters.count {
-                    if characters[index] == character {
-                        if index + 1 < characters.count, characters[index + 1] == character { index += 2; continue }
-                        index += 1
-                        break
-                    }
-                    index += 1
-                }
-                tokens.append(Token(text: String(characters[start..<index]), kind: character == "'" ? .string : .quoted))
-            } else if character.isLetter || character == "_" || character == "$" {
-                let start = index
-                while index < characters.count, characters[index].isLetter || characters[index].isNumber || characters[index] == "_" || characters[index] == "$" { index += 1 }
-                tokens.append(Token(text: String(characters[start..<index]), kind: .word))
-            } else if character.isNumber {
-                let start = index
-                while index < characters.count, characters[index].isNumber || characters[index] == "." { index += 1 }
-                tokens.append(Token(text: String(characters[start..<index]), kind: .number))
-            } else {
-                let pair = index + 1 < characters.count ? String([character, characters[index + 1]]) : ""
-                if ["<>", "<=", ">=", "!=", "::", "||", "->"].contains(pair) {
-                    tokens.append(Token(text: pair, kind: .symbol))
-                    index += 2
-                } else {
-                    tokens.append(Token(text: String(character), kind: .symbol))
-                    index += 1
-                }
-            }
-        }
-        return tokens
+    /// Ends the current line, unless a line comment already did.
+    func endingLine() -> String {
+        let trimmed = trimmingTrailingSpaces()
+        return trimmed.hasSuffix("\n") ? trimmed : trimmed + "\n"
     }
 }

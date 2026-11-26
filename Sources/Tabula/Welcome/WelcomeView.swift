@@ -38,13 +38,13 @@ struct WelcomeView: View {
             }
         }
         .confirmationDialog(
-            "Eliminare la connessione \"\(pendingDeletion?.name ?? "")\"?",
+            "Delete the connection “\(pendingDeletion?.name ?? "")”?",
             isPresented: Binding(get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } }),
             presenting: pendingDeletion
         ) { connection in
-            Button("Elimina", role: .destructive) { perform { try model.delete(connection.id) } }
+            Button("Delete", role: .destructive) { perform { try model.delete(connection.id) } }
         }
-        .alert("Errore", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+        .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK") {}
         } message: {
             Text(errorMessage ?? "")
@@ -57,20 +57,20 @@ struct WelcomeView: View {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
                 .frame(width: 112, height: 112)
-            Text("Benvenuto in Tabula")
+            Text("Welcome to Tabula")
                 .font(.system(size: 20, weight: .semibold))
                 .padding(.top, 10)
-            Text("Versione \(Self.version)")
+            Text("Version \(Self.version)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.top, 2)
             Spacer()
             VStack(alignment: .leading, spacing: 2) {
-                WelcomeAction(title: "Crea una nuova connessione…", systemImage: "plus.circle") { editing = ConnectionDraft() }
+                WelcomeAction(title: "Create a new connection…", systemImage: "plus.circle") { editing = ConnectionDraft() }
                     .keyboardShortcut("n")
-                WelcomeAction(title: "Importa da URL…", systemImage: "link") { importingURL = true }
-                WelcomeAction(title: "Importa da TablePlus…", systemImage: "square.and.arrow.down") { importingTablePlus = true }
-                WelcomeAction(title: "Apri la selezionata", systemImage: "arrow.right.circle") {
+                WelcomeAction(title: "Import from URL…", systemImage: "link") { importingURL = true }
+                WelcomeAction(title: "Import from TablePlus…", systemImage: "square.and.arrow.down") { importingTablePlus = true }
+                WelcomeAction(title: "Open Selected", systemImage: "arrow.right.circle") {
                     selection.flatMap(model.connection).map(open)
                 }
                 .disabled(selection == nil)
@@ -83,17 +83,24 @@ struct WelcomeView: View {
     }
 
     private static var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "sviluppo"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? String(localized: "dev build")
     }
 
     private var connectionList: some View {
         VStack(spacing: 0) {
-            TextField("Cerca una connessione…", text: $search)
+            TextField("Search for a connection…", text: $search)
                 .textFieldStyle(.roundedBorder)
                 .padding(12)
+            if let loadError = model.loadError {
+                Text("Could not read the saved connections: \(loadError)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                    .padding([.horizontal, .bottom], 12)
+            }
             List(selection: $selection) {
                 ForEach(groups, id: \.name) { group in
-                    Section(group.name.isEmpty ? "Connessioni" : group.name) {
+                    Section(group.name.isEmpty ? String(localized: "Connections") : group.name) {
                         ForEach(group.connections) { connection in
                             ConnectionRow(connection: connection, isOpen: model.isOpen(connection.id))
                                 .tag(connection.id)
@@ -108,7 +115,7 @@ struct WelcomeView: View {
             .scrollContentBackground(.hidden)
             .overlay {
                 if model.connections.isEmpty {
-                    ContentUnavailableView("Nessuna connessione", systemImage: "externaldrive", description: Text("Crea la prima con ⌘N"))
+                    ContentUnavailableView("No connections", systemImage: "externaldrive", description: Text("Create the first one with ⌘N"))
                 }
             }
         }
@@ -116,15 +123,12 @@ struct WelcomeView: View {
 
     @ViewBuilder
     private func contextMenu(for connection: ConnectionConfig) -> some View {
-        Button("Apri") { open(connection) }
-        Button("Modifica…") { editing = ConnectionDraft(connection: connection, password: model.savedPassword(for: connection.id)) }
-        Button("Duplica") { perform { try model.duplicate(connection) } }
-        Button("Copia come URL") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(ConnectionURL.format(connection), forType: .string)
-        }
+        Button("Open") { open(connection) }
+        Button("Edit…") { editing = ConnectionDraft(connection: connection) { try model.store.password(for: connection.id) } }
+        Button("Duplicate") { perform { try model.duplicate(connection) } }
+        Button("Copy as URL") { Pasteboard.copy(ConnectionURL.format(connection)) }
         Divider()
-        Button("Elimina", role: .destructive) { pendingDeletion = connection }
+        Button("Delete", role: .destructive) { pendingDeletion = connection }
     }
 
     private var groups: [(name: String, connections: [ConnectionConfig])] {
@@ -162,7 +166,7 @@ struct WelcomeView: View {
 }
 
 private struct WelcomeAction: View {
-    let title: String
+    let title: LocalizedStringKey
     let systemImage: String
     let action: () -> Void
     @State private var isHovering = false
@@ -197,7 +201,7 @@ private struct ConnectionRow: View {
             }
             Spacer()
             if isOpen {
-                Circle().fill(.green).frame(width: 7, height: 7).help("Connessione aperta")
+                Circle().fill(.green).frame(width: 7, height: 7).help("Connection open")
             }
         }
         .padding(.vertical, 3)
@@ -218,20 +222,24 @@ private struct ImportURLView: View {
     @State private var text = ""
 
     var body: some View {
+        let parsed = ConnectionURL.parse(text)
         VStack(alignment: .leading, spacing: 12) {
-            Text("URL di connessione").font(.headline)
+            Text("Connection URL").font(.headline)
             TextField("postgresql://user@localhost/databasename", text: $text)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 420)
-            if !text.isEmpty, ConnectionURL.parse(text) == nil {
-                Text("URL non valido").font(.caption).foregroundStyle(.red)
+            if !text.isEmpty, parsed == nil {
+                Text("Invalid URL").font(.caption).foregroundStyle(.red)
+            }
+            if let warning = parsed?.warning {
+                Label(warning, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
             }
             HStack {
                 Spacer()
-                Button("Annulla") { onFinish(nil) }.keyboardShortcut(.cancelAction)
-                Button("Importa") { onFinish(ConnectionURL.parse(text)) }
+                Button("Cancel") { onFinish(nil) }.keyboardShortcut(.cancelAction)
+                Button("Import") { onFinish(parsed) }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(ConnectionURL.parse(text) == nil)
+                    .disabled(parsed == nil)
             }
         }
         .padding(20)

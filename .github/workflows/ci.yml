@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15  # same runner as the release, so the bundled dylibs match LSMinimumSystemVersion
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install libpq
+        run: brew install libpq
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      # Same bundling as the release (ad-hoc signature); CI=true makes the minos check fatal.
+      - name: Build app bundle
+        run: TABULA_SIGN_IDENTITY=- ./scripts/build-app.sh

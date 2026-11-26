@@ -2,7 +2,7 @@ import SwiftUI
 import TabulaCore
 import UniformTypeIdentifiers
 
-/// "Importa da TablePlus…": pick the export, type its password, review, import.
+/// Import from a TablePlus export: pick the file, type its password, review, import.
 struct ImportTablePlusView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -15,22 +15,22 @@ struct ImportTablePlusView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Importa connessioni da TablePlus").font(.headline)
-            Text("In TablePlus: File › Export Connections. Serve la password scelta durante l'esportazione.")
+            Text("Import Connections from TablePlus").font(.headline)
+            Text("In TablePlus: File › Export Connections. You need the password chosen during export.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
-                Text(fileURL?.lastPathComponent ?? "Nessun file scelto")
+                Text(fileURL?.lastPathComponent ?? String(localized: "No file chosen"))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .foregroundStyle(fileURL == nil ? .secondary : .primary)
                 Spacer()
-                Button("Scegli file…") { choosingFile = true }
+                Button("Choose File…") { choosingFile = true }
             }
             HStack {
-                SecureField("Password dell'export", text: $password)
+                SecureField("Export password", text: $password)
                     .onSubmit(read)
-                Button("Leggi", action: read).disabled(fileURL == nil)
+                Button("Read", action: read).disabled(fileURL == nil)
             }
             if let errorMessage {
                 Text(errorMessage).font(.caption).foregroundStyle(.red)
@@ -38,8 +38,8 @@ struct ImportTablePlusView: View {
             if let preview { previewList(preview) }
             HStack {
                 Spacer()
-                Button("Annulla") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Importa \(selected.count)") { importSelected() }
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Import \(selected.count)") { importSelected() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(selected.isEmpty)
             }
@@ -57,17 +57,18 @@ struct ImportTablePlusView: View {
     private func previewList(_ preview: TablePlusImport) -> some View {
         List {
             ForEach(preview.connections) { item in
-                let isDuplicate = model.connections.contains { $0.pointsToSameServer(as: item.connection) }
+                let isDuplicate = model.isAlreadySaved(item.connection)
                 HStack(alignment: .top) {
-                    Toggle("", isOn: binding(for: item.id)).labelsHidden()
+                    Toggle(isOn: binding(for: item.id)) {}.labelsHidden()
                     DriverIcon(kind: item.connection.kind, size: 24)
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(item.connection.name).fontWeight(.medium)
                             TagBadge(tag: item.connection.tag)
-                            if isDuplicate { Text("già presente").font(.caption2).foregroundStyle(.orange) }
+                            if isDuplicate { Text("already exists").font(.caption2).foregroundStyle(.orange) }
                         }
-                        Text("\(item.connection.host):\(port(item.connection)) · \(item.connection.user)\(item.password != nil ? " · password inclusa" : "")")
+                        let address = "\(item.connection.host):\(port(item.connection)) · \(item.connection.user)"
+                        Text(item.password == nil ? address : String(localized: "\(address) · password included"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         ForEach(item.warnings, id: \.self) { warning in
@@ -77,7 +78,7 @@ struct ImportTablePlusView: View {
                 }
             }
             ForEach(preview.skipped, id: \.name) { skipped in
-                Label("\(skipped.name): \(skipped.reason)", systemImage: "minus.circle").font(.caption).foregroundStyle(.secondary)
+                Label(skipped.name + ": " + skipped.reason, systemImage: "minus.circle").font(.caption).foregroundStyle(.secondary)
             }
         }
         .frame(height: 260)
@@ -99,9 +100,7 @@ struct ImportTablePlusView: View {
         do {
             let result = try TablePlusImporter.read(Data(contentsOf: fileURL), password: password)
             preview = result
-            selected = Set(result.connections.filter { item in
-                !model.connections.contains { $0.pointsToSameServer(as: item.connection) }
-            }.map(\.id))
+            selected = Set(result.connections.filter { !model.isAlreadySaved($0.connection) }.map(\.id))
             errorMessage = nil
         } catch {
             preview = nil

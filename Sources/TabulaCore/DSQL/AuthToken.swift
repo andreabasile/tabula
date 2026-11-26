@@ -51,7 +51,7 @@ public enum DSQLConfigurationError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .missingRegion(let endpoint):
-            "Impossibile ricavare la regione da \"\(endpoint)\": indicala a mano."
+            String(localized: "Couldn’t determine the region from “\(endpoint)”: enter it manually.")
         }
     }
 }

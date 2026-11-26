@@ -70,7 +70,7 @@ struct SQLCompleterTests {
     }
 
     @Test func parsesSchemaQualifiedAndQuotedTables() {
-        let refs = SQLCompleter.tableReferences(in: #"SELECT * FROM public."users" AS u, companies_company"#, catalog: catalog)
+        let refs = SQLCompleter.tableReferences(in: #"SELECT * FROM public."users" AS u, companies_company"#)
         #expect(refs == [.init(table: "users", alias: "u"), .init(table: "companies_company", alias: nil)])
     }
 

@@ -20,6 +20,8 @@ struct ConnectionDraft: Identifiable {
     var postgres = PostgresSettings()
     var portText = "5432"
     var password = ""
+    /// The saved password could not be read (e.g. Keychain access denied): an empty field keeps it.
+    var passwordUnreadable = false
     var dsql = DSQLSettings()
     var dsqlUsesAdmin = true
     var script = PreConnectScript(script: "")
@@ -50,24 +52,32 @@ struct ConnectionDraft: Identifiable {
         }
     }
 
+    init(connection: ConnectionConfig, readPassword: () throws -> String?) {
+        do {
+            self = ConnectionDraft(connection: connection, password: try readPassword())
+        } catch {
+            self = ConnectionDraft(connection: connection, password: nil)
+            passwordUnreadable = true
+        }
+    }
+
     init(imported: ConnectionURL.Parsed) {
-        self.init()
         let config = ConnectionConfig(name: "", kind: imported.kind)
-        self = ConnectionDraft(connection: config, password: imported.password)
+        self.init(connection: config, password: imported.password)
         isNew = true
         name = config.host.split(separator: ".").first.map(String.init) ?? config.host
     }
 
     var validationMessage: String? {
-        if name.trimmingCharacters(in: .whitespaces).isEmpty { return "Dai un nome alla connessione" }
+        if name.trimmingCharacters(in: .whitespaces).isEmpty { return String(localized: "Name the connection") }
         switch driver {
         case .postgres:
-            if postgres.host.isEmpty { return "Indica l'host" }
-            if Int(portText) == nil { return "Porta non valida" }
+            if postgres.host.isEmpty { return String(localized: "Enter the host") }
+            if Int(portText) == nil { return String(localized: "Invalid port") }
         case .dsql:
-            if dsql.endpoint.isEmpty { return "Indica l'endpoint del cluster" }
-            if dsql.resolvedRegion == nil { return "Regione non ricavabile dall'endpoint: indicala" }
-            if !dsqlUsesAdmin, dsql.user.isEmpty { return "Indica il ruolo database" }
+            if dsql.endpoint.isEmpty { return String(localized: "Enter the cluster endpoint") }
+            if dsql.resolvedRegion == nil { return String(localized: "Can’t determine the region from the endpoint: enter it") }
+            if !dsqlUsesAdmin, dsql.user.isEmpty { return String(localized: "Enter the database role") }
         }
         return nil
     }

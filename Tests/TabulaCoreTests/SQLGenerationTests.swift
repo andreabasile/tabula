@@ -63,7 +63,7 @@ struct TableQueryTests {
         let query = TableQuery(
             table: table,
             filters: [ColumnFilter(column: "status", op: .equals, value: "paid"), ColumnFilter(column: "note", op: .contains, value: "50%")],
-            sort: SortOrder(column: "created_at", ascending: false)
+            sort: ColumnSort(column: "created_at", ascending: false)
         )
         #expect(query.selectSQL(columns: []) == #"SELECT * FROM "app"."orders" WHERE "status" = 'paid' AND "note"::text ILIKE '%50\%%' ORDER BY "created_at" DESC LIMIT 300 OFFSET 0"#)
     }

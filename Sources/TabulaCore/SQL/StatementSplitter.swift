@@ -143,7 +143,7 @@ private struct Scanner {
     mutating func skipQuoted() -> Bool {
         guard let unit = peek() else { return false }
         if unit == ascii("'") || unit == ascii("\"") {
-            skipDelimited(by: unit)
+            skipDelimited(by: unit, backslashEscapes: unit == ascii("'") && followsEscapePrefix())
             return true
         }
         if unit == ascii("$"), let tag = dollarTag() {
@@ -155,13 +155,28 @@ private struct Scanner {
         return false
     }
 
-    private mutating func skipDelimited(by quote: UTF16.CodeUnit) {
+    private mutating func skipDelimited(by quote: UTF16.CodeUnit, backslashEscapes: Bool) {
         advance()
         while let unit = peek() {
             advance()
+            if backslashEscapes, unit == ascii("\\") {
+                advance()
+                continue
+            }
             guard unit == quote else { continue }
             if peek() == quote { advance() } else { return }
         }
+    }
+
+    /// `E'…'`: the quote follows a lone E, so a backslash escapes the next character.
+    /// Keep in sync with SQLTokens, which lexes the same strings.
+    private func followsEscapePrefix() -> Bool {
+        guard offset > 0, units[offset - 1] == ascii("E") || units[offset - 1] == ascii("e") else { return false }
+        guard offset > 1 else { return true }
+        let before = units[offset - 2]
+        let isIdentifier = (before >= ascii("a") && before <= ascii("z")) || (before >= ascii("A") && before <= ascii("Z"))
+            || (before >= ascii("0") && before <= ascii("9")) || before == ascii("_")
+        return !isIdentifier
     }
 
     /// `$$` or `$tag$`, where tag is an identifier (so `$1` parameters are not tags).

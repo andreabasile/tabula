@@ -7,7 +7,7 @@ public enum KeychainError: Error, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unexpectedStatus(let status):
-            (SecCopyErrorMessageString(status, nil) as String?) ?? "Errore Portachiavi \(status)"
+            (SecCopyErrorMessageString(status, nil) as String?) ?? String(localized: "Keychain error \(status)")
         }
     }
 }
@@ -31,14 +31,21 @@ public struct KeychainSecretStore: SecretStoring {
     }
 
     public func setPassword(_ password: String?, for connectionID: UUID) throws {
-        let deleteStatus = SecItemDelete(baseQuery(connectionID) as CFDictionary)
-        guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
-            throw KeychainError.unexpectedStatus(deleteStatus)
+        guard let password, !password.isEmpty else {
+            let deleteStatus = SecItemDelete(baseQuery(connectionID) as CFDictionary)
+            guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
+                throw KeychainError.unexpectedStatus(deleteStatus)
+            }
+            return
         }
-        guard let password, !password.isEmpty else { return }
+        // Update in place: deleting first would lose the old password if the add then failed.
+        let data = Data(password.utf8)
+        let updateStatus = SecItemUpdate(baseQuery(connectionID) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else { throw KeychainError.unexpectedStatus(updateStatus) }
         var item = baseQuery(connectionID)
-        item[kSecValueData as String] = Data(password.utf8)
-        item[kSecAttrLabel as String] = "Tabula — connessione"
+        item[kSecValueData as String] = data
+        item[kSecAttrLabel as String] = "Tabula — connection"
         let status = SecItemAdd(item as CFDictionary, nil)
         guard status == errSecSuccess else { throw KeychainError.unexpectedStatus(status) }
     }
