@@ -1,5 +1,4 @@
 import SwiftUI
-import TabulaCore
 
 struct ConsoleLogView: View {
     let entries: [LogEntry]

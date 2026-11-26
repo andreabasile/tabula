@@ -31,6 +31,11 @@ struct TablePlusImporterTests {
         #expect(throws: RNCryptor.Failure.wrongPassword) { try TablePlusImporter.read(encrypted, password: "nope") }
     }
 
+    @Test func rejectsFilesThatAreNotExports() {
+        #expect(throws: TablePlusImporter.Failure.notAnExport) { try TablePlusImporter.read(Data("not json".utf8), password: "") }
+        #expect(throws: TablePlusImporter.Failure.notAnExport) { try TablePlusImporter.parse(json: Data(#"{"a": 1}"#.utf8)) }
+    }
+
     @Test func mapsPostgresFields() throws {
         let result = try TablePlusImporter.parse(json: Data(export.utf8))
         let test = try #require(result.connections.first { $0.connection.name == "app TEST" })
@@ -60,9 +65,16 @@ struct TablePlusImporterTests {
         #expect(dsql.password == nil)
     }
 
+    @Test func warnsWhenCertificateVerificationIsDropped() throws {
+        let json = #"[{"Name":"g","connections":[{"ConnectionName":"v","Driver":"PostgreSQL","DatabaseHost":"h","tLSMode":5}],"groups":[]}]"#
+        let item = try #require(try TablePlusImporter.parse(json: Data(json.utf8)).connections.first)
+        #expect(item.connection.kind == .postgres(PostgresSettings(host: "h", sslMode: .required)))
+        #expect(item.warnings == [SSLMode.unverifiedCertificateWarning])
+    }
+
     @Test func skipsUnsupportedDrivers() throws {
         let result = try TablePlusImporter.parse(json: Data(export.utf8))
-        #expect(result.skipped == [SkippedConnection(name: "cache", reason: "driver Redis non supportato")])
+        #expect(result.skipped == [SkippedConnection(name: "cache", reason: "unsupported driver Redis")])
     }
 
     @Test func detectsSameServer() {

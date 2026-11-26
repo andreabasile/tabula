@@ -21,6 +21,14 @@ public struct TablePlusImport: Sendable {
 /// Reads TablePlus's "Export Connections" file: an encrypted tree of groups, each with
 /// `connections` and nested `groups`.
 public enum TablePlusImporter {
+    public enum Failure: Error, Equatable, LocalizedError {
+        case notAnExport
+
+        public var errorDescription: String? {
+            String(localized: "This file is not a TablePlus connection export.")
+        }
+    }
+
     private static let postgresDrivers: Set<String> = ["PostgreSQL", "Greenplum", "CockroachDB", "Redshift"]
 
     public static func read(_ data: Data, password: String) throws -> TablePlusImport {
@@ -29,8 +37,8 @@ public enum TablePlusImporter {
     }
 
     public static func parse(json: Data) throws -> TablePlusImport {
-        guard let root = try JSONSerialization.jsonObject(with: json) as? [Any] else {
-            throw RNCryptor.Failure.unknownFormat
+        guard let root = (try? JSONSerialization.jsonObject(with: json)) as? [Any] else {
+            throw Failure.notAnExport
         }
         var imported: [ImportedConnection] = []
         var skipped: [SkippedConnection] = []
@@ -51,22 +59,23 @@ public enum TablePlusImporter {
     }
 
     private static func convert(_ item: [String: Any], group: String, into imported: inout [ImportedConnection], skipped: inout [SkippedConnection]) {
-        let name = string(item["ConnectionName"]).isEmpty ? "Senza nome" : string(item["ConnectionName"])
+        let name = string(item["ConnectionName"]).isEmpty ? String(localized: "Untitled") : string(item["ConnectionName"])
         let driver = string(item["Driver"])
         guard postgresDrivers.contains(driver) else {
-            skipped.append(SkippedConnection(name: name, reason: "driver \(driver.isEmpty ? "sconosciuto" : driver) non supportato"))
+            let reason = driver.isEmpty ? String(localized: "unknown driver not supported") : String(localized: "unsupported driver \(driver)")
+            skipped.append(SkippedConnection(name: name, reason: reason))
             return
         }
         var warnings: [String] = []
         if bool(item["isOverSSH"]) {
-            warnings.append("Usa un tunnel SSH (\(string(item["ServerUser"]))@\(string(item["ServerAddress"]))), che Tabula non gestisce ancora: aprilo a parte.")
+            warnings.append(String(localized: "Uses an SSH tunnel (\(string(item["ServerUser"]))@\(string(item["ServerAddress"]))), which Tabula doesn’t manage yet: open it separately."))
         }
         let host = bool(item["isUseSocket"]) && !string(item["DatabaseSocket"]).isEmpty ? string(item["DatabaseSocket"]) : string(item["DatabaseHost"])
         let kind: ConnectionKind
         var password: String?
         if DSQLEndpoint.isDSQLHost(host) {
-            kind = .dsql(DSQLSettings(endpoint: host, user: string(item["DatabaseUser"]).isEmpty ? DSQLSettings.adminRole : string(item["DatabaseUser"]), database: string(item["DatabaseName"]).isEmpty ? "postgres" : string(item["DatabaseName"])))
-            warnings.append("Endpoint DSQL: scegli il profilo AWS nella modifica della connessione.")
+            kind = .dsql(DSQLSettings(endpoint: host, userOrDefault: string(item["DatabaseUser"]), databaseOrDefault: string(item["DatabaseName"])))
+            warnings.append(String(localized: "DSQL endpoint: choose the AWS profile when editing the connection."))
         } else {
             let storage = passwordStorage(item["DatabasePasswordMode"])
             kind = .postgres(PostgresSettings(
@@ -78,8 +87,13 @@ public enum TablePlusImporter {
                 passwordStorage: storage
             ))
             password = storage == .keychain ? nonEmpty(item["DatabasePassword"]) : nil
+            if [4, 5].contains(int(item["tLSMode"])) { warnings.append(SSLMode.unverifiedCertificateWarning) }
         }
         let startupScript = string(item["StartupBashScript"])
+        if let firstLine = startupScript.split(whereSeparator: \.isNewline).first(where: { !$0.allSatisfy(\.isWhitespace) }) {
+            // It runs in a shell on every connect: an export from someone else must not run it unseen.
+            warnings.append(String(localized: "Runs a shell script before connecting. Review it before you connect: \(String(firstLine))"))
+        }
         let connection = ConnectionConfig(
             name: name,
             tag: ConnectionTag(rawValue: string(item["Enviroment"]).lowercased()) ?? .local,
@@ -142,17 +156,5 @@ public enum TablePlusImporter {
 
     private static func bool(_ value: Any?) -> Bool {
         (int(value) ?? 0) != 0
-    }
-}
-
-extension ConnectionConfig {
-    /// Same server, port, user and database: used to skip connections already imported.
-    public func pointsToSameServer(as other: ConnectionConfig) -> Bool {
-        guard host == other.host, user == other.user, database == other.database else { return false }
-        switch (kind, other.kind) {
-        case (.postgres(let lhs), .postgres(let rhs)): return lhs.port == rhs.port
-        case (.dsql, .dsql): return true
-        default: return false
-        }
     }
 }

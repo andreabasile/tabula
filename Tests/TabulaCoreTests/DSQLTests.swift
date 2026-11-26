@@ -104,6 +104,28 @@ struct CachedTokenProviderTests {
     }
 }
 
+struct ProcessCommandRunnerTests {
+    @Test func drainsLargeOutputWhileTheCommandRuns() async throws {
+        let output = try await ProcessCommandRunner().run(executable: "/bin/sh", arguments: ["-c", "head -c 200000 /dev/zero | tr '\\0' x >&2; echo ok"])
+        #expect(output.exitCode == 0)
+        #expect(output.stdout == "ok\n")
+        #expect(output.stderr.count == 200_000)
+    }
+
+    @Test func doesNotWaitForHelpersThatKeepThePipesOpen() async throws {
+        let started = ContinuousClock.now
+        let output = try await ProcessCommandRunner(timeoutSeconds: 1).run(executable: "/bin/sh", arguments: ["-c", "(trap '' TERM; sleep 8) & sleep 8"])
+        #expect(ContinuousClock.now - started < .seconds(5))
+        #expect(output.exitCode != 0)
+    }
+
+    @Test func stopsACommandThatHangs() async throws {
+        let output = try await ProcessCommandRunner(timeoutSeconds: 1).run(executable: "/bin/sleep", arguments: ["30"])
+        #expect(output.exitCode != 0)
+        #expect(output.stderr.contains("did not finish"))
+    }
+}
+
 struct ConnectionLifetimePolicyTests {
     @Test func dsqlRecyclesAt55Minutes() {
         let opened = Date(timeIntervalSince1970: 0)

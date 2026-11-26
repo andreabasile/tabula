@@ -17,14 +17,14 @@ struct OpenConnectionSheet: View {
 
     var body: some View {
         PickerSheet(
-            title: "Apri connessione",
-            searchPrompt: "Cerca una connessione…",
+            title: "Open Connection",
+            searchPrompt: "Search for a connection…",
             search: $search,
-            primaryTitle: "Apri",
+            primaryTitle: "Open",
             canConfirm: selection != nil,
             onConfirm: open,
             extraButtons: {
-                Button("Nuova…") {
+                Button("New…") {
                     dismiss()
                     openWindow(id: WindowID.welcome)
                 }
@@ -39,11 +39,11 @@ struct OpenConnectionSheet: View {
                                 Text(connection.name).fontWeight(.medium)
                                 TagBadge(tag: connection.tag)
                             }
-                            Text("\(connection.host) : \(connection.database)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Text(verbatim: "\(connection.host) : \(connection.database)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                         Spacer()
                         if appModel.isOpen(connection.id) {
-                            Text("aperta").font(.caption2).foregroundStyle(.green)
+                            Text("open").font(.caption2).foregroundStyle(.green)
                         }
                     }
                     .padding(.vertical, 2)
@@ -77,10 +77,10 @@ struct OpenDatabaseSheet: View {
 
     var body: some View {
         PickerSheet(
-            title: "Apri database",
-            searchPrompt: "Cerca un database…",
+            title: "Open Database",
+            searchPrompt: "Search for a database…",
             search: $search,
-            primaryTitle: "Apri",
+            primaryTitle: "Open",
             canConfirm: selection != nil,
             onConfirm: open,
             extraButtons: { EmptyView() }
@@ -116,10 +116,10 @@ struct OpenDatabaseSheet: View {
 
 private struct PickerSheet<Content: View, Extra: View>: View {
     @Environment(\.dismiss) private var dismiss
-    let title: String
-    let searchPrompt: String
+    let title: LocalizedStringKey
+    let searchPrompt: LocalizedStringKey
     @Binding var search: String
-    let primaryTitle: String
+    let primaryTitle: LocalizedStringKey
     let canConfirm: Bool
     let onConfirm: () -> Void
     @ViewBuilder let extraButtons: () -> Extra
@@ -137,7 +137,7 @@ private struct PickerSheet<Content: View, Extra: View>: View {
             HStack {
                 extraButtons()
                 Spacer()
-                Button("Annulla") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(primaryTitle, action: onConfirm)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!canConfirm)

@@ -10,6 +10,28 @@ public enum SSLMode: String, Codable, CaseIterable, Sendable {
     case disabled = "DISABLED"
     case preferred = "PREFERRED"
     case required = "REQUIRED"
+
+    public var title: String {
+        switch self {
+        case .disabled: String(localized: "DISABLED")
+        case .preferred: String(localized: "PREFERRED")
+        case .required: String(localized: "REQUIRED")
+        }
+    }
+
+    /// The `sslmode` libpq and connection URLs use.
+    public var libpqName: String {
+        switch self {
+        case .disabled: "disable"
+        case .preferred: "prefer"
+        case .required: "require"
+        }
+    }
+
+    /// Shown when an imported connection asked for verify-ca/verify-full, which become REQUIRED.
+    public static var unverifiedCertificateWarning: String {
+        String(localized: "The source verifies the server certificate (verify-ca/verify-full). Tabula encrypts the connection (REQUIRED) but does not check the certificate.")
+    }
 }
 
 public enum PasswordStorage: String, Codable, CaseIterable, Sendable {
@@ -45,6 +67,7 @@ public struct PostgresSettings: Codable, Equatable, Sendable {
 
 public struct DSQLSettings: Codable, Equatable, Sendable {
     public static let adminRole = "admin"
+    public static let defaultDatabase = "postgres"
 
     public var endpoint: String
     /// Empty means "derive it from the endpoint".
@@ -60,7 +83,7 @@ public struct DSQLSettings: Codable, Equatable, Sendable {
         region: String = "",
         awsProfile: String = "",
         user: String = DSQLSettings.adminRole,
-        database: String = "postgres",
+        database: String = DSQLSettings.defaultDatabase,
         tokenLifetimeSeconds: Int = 900
     ) {
         self.endpoint = endpoint
@@ -69,6 +92,11 @@ public struct DSQLSettings: Codable, Equatable, Sendable {
         self.user = user
         self.database = database
         self.tokenLifetimeSeconds = tokenLifetimeSeconds
+    }
+
+    /// For imports (URL, TablePlus) that may leave user or database empty.
+    public init(endpoint: String, userOrDefault user: String, databaseOrDefault database: String) {
+        self.init(endpoint: endpoint, user: user.isEmpty ? Self.adminRole : user, database: database.isEmpty ? Self.defaultDatabase : database)
     }
 
     public var isAdmin: Bool { user == Self.adminRole }
@@ -82,6 +110,11 @@ public struct DSQLSettings: Codable, Equatable, Sendable {
 public enum ConnectionKind: Codable, Equatable, Sendable {
     case postgres(PostgresSettings)
     case dsql(DSQLSettings)
+
+    public var isDSQL: Bool {
+        if case .dsql = self { return true }
+        return false
+    }
 
     public var driverName: String {
         switch self {
@@ -151,6 +184,16 @@ public struct ConnectionConfig: Codable, Equatable, Identifiable, Sendable {
         switch kind {
         case .postgres(let settings): settings.user
         case .dsql(let settings): settings.user
+        }
+    }
+
+    /// Same server, port, user and database: used to skip connections already imported.
+    public func pointsToSameServer(as other: ConnectionConfig) -> Bool {
+        guard host == other.host, user == other.user, database == other.database else { return false }
+        switch (kind, other.kind) {
+        case (.postgres(let lhs), .postgres(let rhs)): return lhs.port == rhs.port
+        case (.dsql, .dsql): return true
+        default: return false
         }
     }
 }

@@ -48,12 +48,12 @@ private struct ConnectionRail: View {
                         RailItem(workspace: workspace, isActive: workspace.id == appModel.activeWorkspace?.id) {
                             appModel.activeWorkspaceID = workspace.id
                         } onClose: {
-                            appModel.closeWorkspace(workspace.id)
+                            if !workspace.hasUnsavedChanges || UnsavedChanges.confirmDiscard() { appModel.closeWorkspace(workspace.id) }
                         }
                         .background {
                             // ⌘1…⌘9 jump to a connection, like browser tabs.
                             if index < 9 {
-                                Button("") { appModel.activeWorkspaceID = workspace.id }
+                                Button { appModel.activeWorkspaceID = workspace.id } label: {}
                                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
                                     .hidden()
                             }
@@ -70,7 +70,7 @@ private struct ConnectionRail: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("Apri un'altra connessione (⌘K)")
+            .help("Open another connection (⌘K)")
             .padding(.bottom, 6)
         }
         .frame(width: 76)
@@ -114,15 +114,15 @@ private struct RailItem: View {
                 }
                 .buttonStyle(.plain)
                 .padding(5)
-                .help("Chiudi la connessione")
+                .help("Close connection")
             }
         }
         .onHover { isHovering = $0 }
         .help(tooltip)
         .contextMenu {
-            Button("Riconnetti") { Task { await workspace.reconnect() } }
+            Button("Reconnect") { Task { await workspace.reconnect() } }
             Divider()
-            Button("Chiudi", action: onClose)
+            Button("Close", action: onClose)
         }
     }
 
@@ -143,8 +143,7 @@ private struct RailItem: View {
     }
 
     private var tooltip: String {
-        let database = workspace.currentDatabase.isEmpty ? workspace.connection.database : workspace.currentDatabase
-        return "Driver: \(workspace.connection.kind.driverName)\nNome: \(workspace.connection.name)\nDatabase: \(database)"
+        String(localized: "Driver: \(workspace.connection.kind.driverName)\nName: \(workspace.connection.name)\nDatabase: \(workspace.currentDatabase)")
     }
 }
 
@@ -202,7 +201,7 @@ private struct WorkspaceContent: View {
         if model.phase == .connecting, model.hasPreConnectScript {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Eseguo lo script prima della connessione e attendo il tunnel…").font(.callout)
+                Text("Running the pre-connect script and waiting for the tunnel…").font(.callout)
                 Spacer()
             }
             .padding(8)
@@ -213,7 +212,7 @@ private struct WorkspaceContent: View {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 Text(message).textSelection(.enabled).font(.callout)
                 Spacer()
-                Button("Riprova") { Task { await model.connect() } }
+                Button("Retry") { Task { await model.connect() } }
             }
             .padding(10)
             .background(.orange.opacity(0.12))
@@ -239,10 +238,10 @@ private struct EmptyWorkspaceView: View {
                 .font(.system(size: 44, weight: .light))
                 .foregroundStyle(.tertiary)
             VStack(spacing: 6) {
-                ShortcutHint(keys: "⌘K", text: "Apri un'altra connessione")
-                if !model.isDSQL { ShortcutHint(keys: "⌘D", text: "Apri un database") }
-                ShortcutHint(keys: "⌘T", text: "Nuova query SQL")
-                ShortcutHint(keys: "⌘P", text: "Cerca una tabella nella barra laterale")
+                ShortcutHint(keys: "⌘K", text: "Open another connection")
+                if !model.isDSQL { ShortcutHint(keys: "⌘D", text: "Open a database") }
+                ShortcutHint(keys: "⌘T", text: "New SQL Query")
+                ShortcutHint(keys: "⌘P", text: "Search for a table in the sidebar")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -252,7 +251,7 @@ private struct EmptyWorkspaceView: View {
 
 private struct ShortcutHint: View {
     let keys: String
-    let text: String
+    let text: LocalizedStringKey
 
     var body: some View {
         HStack(spacing: 10) {
@@ -279,8 +278,8 @@ private struct ConfirmationSheet: View {
             HStack {
                 Image(systemName: "exclamationmark.shield.fill").font(.title).foregroundStyle(connection.tag.color)
                 VStack(alignment: .leading) {
-                    Text("Eseguire su \(connection.name)?").font(.headline)
-                    Text("Connessione \(connection.tag.title) in modalità sicura").font(.caption).foregroundStyle(.secondary)
+                    Text("Run on \(connection.name)?").font(.headline)
+                    Text("\(connection.tag.title) connection in safe mode").font(.caption).foregroundStyle(.secondary)
                 }
             }
             ScrollView {
@@ -294,8 +293,8 @@ private struct ConfirmationSheet: View {
             .background(Theme.hover, in: RoundedRectangle(cornerRadius: 6))
             HStack {
                 Spacer()
-                Button("Annulla") { confirmation.resume(false) }.keyboardShortcut(.cancelAction)
-                Button("Esegui") { confirmation.resume(true) }.keyboardShortcut(.defaultAction)
+                Button("Cancel") { confirmation.resume(false) }.keyboardShortcut(.cancelAction)
+                Button("Run") { confirmation.resume(true) }.keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
@@ -309,11 +308,11 @@ private struct PasswordPrompt: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Password per \(connection.user)@\(connection.host)").font(.headline)
+            Text("Password for \(connection.user)@\(connection.host)").font(.headline)
             SecureField("Password", text: $password).frame(width: 320)
             HStack {
                 Spacer()
-                Button("Connetti") { onSubmit(password) }.keyboardShortcut(.defaultAction)
+                Button("Connect") { onSubmit(password) }.keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)

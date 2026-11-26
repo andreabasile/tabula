@@ -31,25 +31,24 @@ final class LineNumberRuler: NSRulerView {
         var lineNumber = textView.string.utf16Units[..<firstCharacter].lazy.filter { $0 == 0x0A }.count + 1
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.tertiaryLabelColor]
         let offset = convert(NSPoint.zero, from: textView).y + textView.textContainerInset.height
+        func drawNumber(_ number: Int, centeredIn lineRect: NSRect) {
+            let label = "\(number)" as NSString
+            let size = label.size(withAttributes: attributes)
+            label.draw(at: NSPoint(x: ruleThickness - size.width - 8, y: offset + lineRect.minY + (lineRect.height - size.height) / 2), withAttributes: attributes)
+        }
         var characterIndex = firstCharacter
         let end = NSMaxRange(layoutManager.characterRange(forGlyphRange: visible, actualGlyphRange: nil))
         repeat {
             let lineRange = text.lineRange(for: NSRange(location: characterIndex, length: 0))
             let glyphs = layoutManager.glyphRange(forCharacterRange: NSRange(location: lineRange.location, length: 0), actualCharacterRange: nil)
             let lineRect = layoutManager.lineFragmentRect(forGlyphAt: min(glyphs.location, max(layoutManager.numberOfGlyphs - 1, 0)), effectiveRange: nil)
-            let label = "\(lineNumber)" as NSString
-            let size = label.size(withAttributes: attributes)
-            label.draw(at: NSPoint(x: ruleThickness - size.width - 8, y: offset + lineRect.minY + (lineRect.height - size.height) / 2), withAttributes: attributes)
+            drawNumber(lineNumber, centeredIn: lineRect)
             lineNumber += 1
             characterIndex = NSMaxRange(lineRange)
         } while characterIndex < end
         if text.length == 0 || text.hasSuffix("\n"), characterIndex >= text.length {
             let extra = layoutManager.extraLineFragmentRect
-            if extra.height > 0 {
-                let label = "\(lineNumber)" as NSString
-                let size = label.size(withAttributes: attributes)
-                label.draw(at: NSPoint(x: ruleThickness - size.width - 8, y: offset + extra.minY + (extra.height - size.height) / 2), withAttributes: attributes)
-            }
+            if extra.height > 0 { drawNumber(lineNumber, centeredIn: extra) }
         }
     }
 }

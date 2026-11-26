@@ -5,7 +5,7 @@ import Testing
 struct ManagedSessionTests {
     let request = TokenRequest(endpoint: "c.dsql.eu-west-1.on.aws", region: "eu-west-1", awsProfile: "", isAdmin: true, lifetimeSeconds: 900)
 
-    func makeSession(opener: FakeOpener, clock: TestClock, generator: CountingGenerator) -> ManagedSession {
+    func makeSession(opener: ConnectionOpening, clock: TestClock, generator: CountingGenerator) -> ManagedSession {
         let tokens = CachedTokenProvider(generator: generator, now: clock.now)
         let provider = DSQLCredentialsProvider(settings: DSQLSettings(endpoint: request.endpoint), tokens: tokens)
         return ManagedSession(opener: opener, credentialsProvider: provider, lifetime: .dsql, now: clock.now)
@@ -36,6 +36,52 @@ struct ManagedSessionTests {
         #expect(opened.count == 2)
         #expect(opened.last?.password == "token-2")
         #expect(await opener.closedCount == 1)
+    }
+
+    @Test func doesNotRecycleInsideAnOpenTransaction() async throws {
+        let clock = TestClock()
+        let opener = FakeOpener()
+        let session = makeSession(opener: opener, clock: clock, generator: CountingGenerator(clock: clock))
+        _ = try await session.execute("BEGIN")
+        await opener.setInTransaction(true)
+        clock.advance(56 * 60)
+        _ = try await session.execute("SELECT 1")
+        #expect(await opener.opened.count == 1)
+    }
+
+    @Test func readsInsideATransactionAreNotReplayedAfterDrop() async throws {
+        let clock = TestClock()
+        let opener = FakeOpener()
+        let session = makeSession(opener: opener, clock: clock, generator: CountingGenerator(clock: clock))
+        try await session.connect()
+        await opener.setInTransaction(true)
+        await opener.failNextQuery(with: .connectionLost("gone"))
+        await #expect(throws: DatabaseError.connectionLost("gone")) { _ = try await session.execute("SELECT 1") }
+        #expect(await opener.executed == ["SELECT 1"])
+    }
+
+    @Test func closedSessionDoesNotReopen() async throws {
+        let clock = TestClock()
+        let opener = FakeOpener()
+        let session = makeSession(opener: opener, clock: clock, generator: CountingGenerator(clock: clock))
+        try await session.connect()
+        await session.close()
+        await #expect(throws: DatabaseError.self) { _ = try await session.execute("SELECT 1") }
+        #expect(await opener.opened.count == 1)
+        try await session.connect()
+        #expect(await opener.opened.count == 2)
+    }
+
+    @Test func closeDuringConnectDoesNotLeaveALiveConnection() async throws {
+        let clock = TestClock()
+        let opener = GatedOpener()
+        let session = makeSession(opener: opener, clock: clock, generator: CountingGenerator(clock: clock))
+        let connecting = Task { try await session.connect() }
+        while !(await opener.isOpening) { await Task.yield() }
+        await session.close()
+        await opener.release()
+        await #expect(throws: DatabaseError.self) { try await connecting.value }
+        #expect(await opener.fake.closedCount == 1)
     }
 
     @Test func reconnectsAndRetriesReadsWhenConnectionDrops() async throws {
@@ -115,6 +161,31 @@ actor FakeOpener: ConnectionOpening {
     }
 
     func didClose() { closedCount += 1 }
+
+    private(set) var inTransaction = false
+    func setInTransaction(_ value: Bool) { inTransaction = value }
+    func failNextQuery(with failure: DatabaseError) { pendingFailure = failure }
+}
+
+/// Holds open() until release(), so a test can close the session while a connection is on its way.
+actor GatedOpener: ConnectionOpening {
+    let fake = FakeOpener()
+    private var pending: CheckedContinuation<Void, Never>?
+    var isOpening: Bool { pending != nil }
+
+    nonisolated func open(_ credentials: ConnectionCredentials) async throws -> DatabaseClient {
+        await hold()
+        return try await fake.open(credentials)
+    }
+
+    private func hold() async {
+        await withCheckedContinuation { pending = $0 }
+    }
+
+    func release() {
+        pending?.resume()
+        pending = nil
+    }
 }
 
 struct FakeClient: DatabaseClient {
@@ -124,6 +195,24 @@ struct FakeClient: DatabaseClient {
         for statement in statements { _ = try await owner.run(statement) }
     }
     func close() async { await owner.didClose() }
+    func isInTransaction() async -> Bool { await owner.inTransaction }
+}
+
+struct LibPQParametersTests {
+    @Test func dsqlVerifiesAgainstTheMacOSCABundle() {
+        let token = AuthToken(value: "t", issuedAt: .now, expiresAt: .now)
+        let credentials = ConnectionCredentials(host: "c.dsql.eu-west-1.on.aws", port: 5432, user: "admin", password: "t", database: "postgres", sslMode: .required, token: token)
+        let pairs = Dictionary(uniqueKeysWithValues: LibPQParameters.make(for: credentials).pairs)
+        #expect(pairs["sslmode"] == "verify-full")
+        #expect(pairs["sslrootcert"] == "/etc/ssl/cert.pem")
+    }
+
+    @Test func editsThatMatchNoRowAreDetected() {
+        #expect(LibPQErrors.matchedNoRow("UPDATE 0"))
+        #expect(LibPQErrors.matchedNoRow("DELETE 0"))
+        #expect(!LibPQErrors.matchedNoRow("UPDATE 1"))
+        #expect(!LibPQErrors.matchedNoRow("INSERT 0 1"))
+    }
 }
 
 final class StatusRecorder: @unchecked Sendable {

@@ -1,13 +1,13 @@
 import AppKit
 import SwiftUI
 import TabulaCore
-import UniformTypeIdentifiers
 
 struct QueryTabView: View {
     @Bindable var query: QueryTabModel
     @State private var resultMode: ResultMode = .data
     @State private var showsSearch = false
-    @State private var showsPendingSQL = false
+    /// The outcome whose error banner was closed; the error stays in the messages list.
+    @State private var dismissedErrorID: UUID?
 
     var body: some View {
         VSplitView {
@@ -42,7 +42,7 @@ struct QueryTabView: View {
                 .foregroundStyle(.secondary)
             Spacer()
             Menu {
-                Picker("Limite", selection: $query.rowLimit) {
+                Picker("Limit", selection: $query.rowLimit) {
                     ForEach(QueryLimit.choices, id: \.self) { limit in
                         Text(limitTitle(limit)).tag(limit)
                     }
@@ -53,20 +53,20 @@ struct QueryTabView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help("Aggiunge LIMIT alle SELECT che non ce l'hanno")
+            .help("Adds LIMIT to SELECT statements that don’t have one")
             BarDivider()
             Button("Beautify ⌘I") { query.beautify() }
                 .keyboardShortcut("i")
             BarDivider()
             if query.isRunning {
-                Button("Annulla ⌘.") { query.cancel() }
+                Button("Cancel ⌘.") { query.cancel() }
                     .keyboardShortcut(".", modifiers: .command)
                     .foregroundStyle(.red)
             } else {
                 Menu {
-                    Button("Esegui tutto ⇧⌘↩") { Task { await query.runAll() } }
+                    Button("Run All ⇧⌘↩") { Task { await query.runAll() } }
                 } label: {
-                    Text("Esegui corrente ⌘↩")
+                    Text("Run Current ⌘↩")
                 } primaryAction: {
                     Task { await query.runCurrent() }
                 }
@@ -98,7 +98,9 @@ struct QueryTabView: View {
     private var resultGrid: some View {
         if let outcome = query.selectedOutcome {
             if let error = outcome.error {
-                ErrorBanner(message: error) {}
+                if dismissedErrorID != outcome.id {
+                    ErrorBanner(message: error) { dismissedErrorID = outcome.id }
+                }
                 Spacer()
             } else if outcome.returnsRows {
                 let visible = query.visibleRows(of: outcome)
@@ -116,7 +118,7 @@ struct QueryTabView: View {
                             value: { outcome.value(row: visible[$0], column: $1) },
                             state: { outcome.state(row: visible[$0], column: $1) },
                             onEdit: { outcome.setValue($2, row: visible[$0], column: $1) },
-                            onSort: { query.sortResult(of: outcome, by: $0, ascending: $1) },
+                            onSort: { query.sortResult(of: outcome, by: $0, ascending: $1); return true },
                             table: outcome.source?.table,
                             onDeleteRows: outcome.isEditable ? { outcome.deleteRows(query.selectedRows.map { visible[$0] }) } : nil
                         ),
@@ -124,12 +126,12 @@ struct QueryTabView: View {
                     )
                 }
             } else if outcome.isRunning {
-                ResultPlaceholder(systemImage: "hourglass", text: "In esecuzione…")
+                ResultPlaceholder(systemImage: "hourglass", text: String(localized: "Running…"))
             } else {
                 ResultPlaceholder(systemImage: "checkmark.circle", text: outcome.commandTag)
             }
         } else {
-            ResultPlaceholder(systemImage: "play", text: "⌘↩ esegue lo statement sotto il cursore, ⇧⌘↩ tutto lo script")
+            ResultPlaceholder(systemImage: "play", text: String(localized: "⌘↩ runs the statement under the cursor, ⇧⌘↩ runs the whole script"))
         }
     }
 
@@ -151,7 +153,7 @@ struct QueryTabView: View {
     private var searchBar: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass").foregroundStyle(.tertiary)
-            TextField("Cerca nei risultati…", text: $query.resultSearch)
+            TextField("Search results…", text: $query.resultSearch)
                 .textFieldStyle(.plain)
             Button { showsSearch = false; query.resultSearch = "" } label: { Image(systemName: "xmark.circle.fill") }
                 .buttonStyle(.borderless)
@@ -168,20 +170,20 @@ struct QueryTabView: View {
 
     private var resultFooter: some View {
         HStack(spacing: 4) {
-            Picker("", selection: $resultMode) {
-                ForEach(ResultMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
+            Picker(selection: $resultMode) {
+                ForEach(ResultMode.allCases, id: \.self) { Text($0.title).tag($0) }
+            } label: {}
             .pickerStyle(.segmented)
             .labelsHidden()
             .controlSize(.small)
             .fixedSize()
             if query.outcomes.count > 1 {
                 BarDivider()
-                Picker("", selection: $query.selectedOutcomeID) {
+                Picker(selection: $query.selectedOutcomeID) {
                     ForEach(Array(query.outcomes.enumerated()), id: \.element.id) { index, outcome in
-                        Text("\(index + 1). \(outcome.statement.prefix(40))").tag(UUID?.some(outcome.id))
+                        Text(verbatim: "\(index + 1). \(outcome.statement.prefix(40))").tag(UUID?.some(outcome.id))
                     }
-                }
+                } label: {}
                 .labelsHidden()
                 .controlSize(.small)
                 .frame(maxWidth: 220)
@@ -198,36 +200,24 @@ struct QueryTabView: View {
             }
             Spacer()
             if let outcome = query.selectedOutcome, !outcome.changes.isEmpty {
-                Button("\(outcome.changes.count) modifiche") { showsPendingSQL = true }
-                    .buttonStyle(.link)
-                    .popover(isPresented: $showsPendingSQL, arrowEdge: .top) {
-                        ScrollView {
-                            Text(outcome.pendingStatements.joined(separator: "\n"))
-                                .font(.system(.callout, design: .monospaced))
-                                .textSelection(.enabled)
-                                .padding()
-                        }
-                        .frame(width: 520, height: 220)
-                    }
-                Button("Annulla") { outcome.discardChanges() }
-                Button("Salva ⌘S") { Task { await query.commit(outcome) } }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .keyboardShortcut("s")
-                BarDivider()
+                PendingChangesControls(count: outcome.changes.count, statements: outcome.pendingStatements) {
+                    outcome.discardChanges()
+                } onSave: {
+                    Task { await query.commit(outcome) }
+                }
             } else if let table = query.selectedOutcome?.source?.table, !query.isRunning {
                 Text(table.name)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                    .help("Risultato modificabile: le modifiche vanno su \(table.qualifiedName)")
+                    .help("Editable result: changes are applied to \(table.qualifiedName)")
                 BarDivider()
             }
             Button { showsSearch.toggle() } label: { Image(systemName: "magnifyingglass") }
-                .help("Cerca nei risultati")
+                .help("Search results")
                 .disabled(query.selectedOutcome?.returnsRows != true)
-            Menu("Esporta…") {
+            Menu("Export…") {
                 ForEach(RowCopyFormat.allCases, id: \.self) { format in
-                    Button(format.rawValue) { export(as: format) }
+                    Button(format.title) { export(as: format) }
                 }
             }
             .menuStyle(.borderlessButton)
@@ -243,29 +233,35 @@ struct QueryTabView: View {
     }
 
     private func limitTitle(_ limit: Int) -> String {
-        limit == 0 ? "Nessun limite" : "Limite \(limit)"
+        limit == 0 ? String(localized: "No limit") : String(localized: "Limit \(limit)")
     }
 
     private func rowCountText(_ outcome: StatementOutcome) -> String {
         let total = outcome.rows.count.formatted()
-        let suffix = outcome.isRunning ? " righe finora…" : " righe"
-        guard !query.resultSearch.isEmpty else { return total + suffix }
-        return "\(query.visibleRows(of: outcome).count.formatted()) di \(total)\(suffix)"
+        guard !query.resultSearch.isEmpty else {
+            return outcome.isRunning ? String(localized: "\(total) rows so far…") : String(localized: "\(total) rows")
+        }
+        let visible = query.visibleRows(of: outcome).count.formatted()
+        return outcome.isRunning ? String(localized: "\(visible) of \(total) rows so far…") : String(localized: "\(visible) of \(total) rows")
     }
 
     private func summary(of outcome: StatementOutcome) -> String {
-        let time = outcome.duration.map { String(format: "%.3f s", $0) } ?? "in corso"
-        return outcome.returnsRows ? "\(outcome.rows.count.formatted()) righe · \(time)" : "\(outcome.commandTag) · \(time)"
+        let time = outcome.duration.map { String(format: "%.3f s", $0) } ?? String(localized: "in progress")
+        return outcome.returnsRows ? String(localized: "\(outcome.rows.count.formatted()) rows · \(time)") : "\(outcome.commandTag) · \(time)"
     }
 
     private func export(as format: RowCopyFormat) {
         guard let outcome = query.selectedOutcome else { return }
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "risultato.\(fileExtension(for: format))"
+        panel.nameFieldStringValue = "\(String(localized: "result")).\(fileExtension(for: format))"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let rows = query.visibleRows(of: outcome).map { outcome.rows[$0] }
         let text = RowCopyFormatter.format(rows, columns: outcome.columns.map(\.name), as: format)
-        try? text.write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
     }
 
     private func fileExtension(for format: RowCopyFormat) -> String {
@@ -295,9 +291,15 @@ private struct ElapsedTime: View {
     }
 }
 
-private enum ResultMode: String, CaseIterable {
-    case data = "Dati"
-    case message = "Messaggi"
+private enum ResultMode: CaseIterable {
+    case data, message
+
+    var title: String {
+        switch self {
+        case .data: String(localized: "Data")
+        case .message: String(localized: "Messages")
+        }
+    }
 }
 
 private struct ResultPlaceholder: View {

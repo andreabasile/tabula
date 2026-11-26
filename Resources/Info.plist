@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
 	<key>CFBundleDisplayName</key>
 	<string>Tabula</string>
 	<key>CFBundleExecutable</key>
@@ -10,6 +12,13 @@
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>it.basileandrea.tabula</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>it</string>
+		<string>fr</string>
+		<string>de</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>Tabula</string>
 	<key>CFBundlePackageType</key>

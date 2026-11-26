@@ -24,8 +24,8 @@ struct ConnectionFormView: View {
                 case .dsql: dsqlSection
                 }
                 scriptSection
-                Section("Sicurezza") {
-                    Picker("Modalità", selection: $draft.safeMode) {
+                Section("Security") {
+                    Picker("Mode", selection: $draft.safeMode) {
                         ForEach(SafeMode.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
                 }
@@ -42,11 +42,11 @@ struct ConnectionFormView: View {
     private var header: some View {
         HStack {
             DriverIcon(kind: draft.makeConnection().kind, size: 28)
-            Text("Connessione \(draft.driver.rawValue)").font(.headline)
+            Text("\(draft.driver.rawValue) Connection").font(.headline)
             Spacer()
-            Picker("", selection: $draft.driver) {
+            Picker(selection: $draft.driver) {
                 ForEach(Driver.allCases) { Text($0.rawValue).tag($0) }
-            }
+            } label: {}
             .labelsHidden()
             .fixedSize()
         }
@@ -55,61 +55,61 @@ struct ConnectionFormView: View {
 
     private var generalSection: some View {
         Section {
-            TextField("Nome", text: $draft.name, prompt: Text("La mia connessione"))
+            TextField("Name", text: $draft.name, prompt: Text("My Connection"))
             Picker("Tag", selection: $draft.tag) {
                 ForEach(ConnectionTag.allCases, id: \.self) { tag in
                     Label { Text(tag.title) } icon: { Circle().fill(tag.color) }.tag(tag)
                 }
             }
-            TextField("Gruppo", text: $draft.group, prompt: Text("facoltativo"))
+            TextField("Group", text: $draft.group, prompt: Text("optional"))
         }
     }
 
     private var postgresSection: some View {
         Section("Server") {
-            TextField("Host/Socket", text: $draft.postgres.host, prompt: Text("127.0.0.1"))
-            TextField("Porta", text: $draft.portText, prompt: Text("5432"))
-            TextField("Utente", text: $draft.postgres.user, prompt: Text("user name"))
+            TextField("Host/Socket", text: $draft.postgres.host, prompt: Text(verbatim: "127.0.0.1"))
+            TextField("Port", text: $draft.portText, prompt: Text(verbatim: "5432"))
+            TextField("User", text: $draft.postgres.user, prompt: Text("user name"))
             HStack {
-                SecureField("Password", text: $draft.password, prompt: Text("password"))
+                SecureField("Password", text: $draft.password, prompt: draft.passwordUnreadable ? Text("unchanged (Keychain not readable)") : Text("password"))
                     .disabled(draft.postgres.passwordStorage == .none)
-                Picker("", selection: $draft.postgres.passwordStorage) {
-                    Text("Salva nel Portachiavi").tag(PasswordStorage.keychain)
-                    Text("Chiedi ogni volta").tag(PasswordStorage.askEveryTime)
-                    Text("Nessuna password").tag(PasswordStorage.none)
-                }
+                Picker(selection: $draft.postgres.passwordStorage) {
+                    Text("Save to Keychain").tag(PasswordStorage.keychain)
+                    Text("Ask every time").tag(PasswordStorage.askEveryTime)
+                    Text("No password").tag(PasswordStorage.none)
+                } label: {}
                 .labelsHidden()
                 .fixedSize()
             }
             TextField("Database", text: $draft.postgres.database, prompt: Text("database name"))
-            Picker("Modalità SSL", selection: $draft.postgres.sslMode) {
-                ForEach(SSLMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            Picker("SSL mode", selection: $draft.postgres.sslMode) {
+                ForEach(SSLMode.allCases, id: \.self) { Text($0.title).tag($0) }
             }
         }
     }
 
     private var dsqlSection: some View {
         Section {
-            TextField("Endpoint", text: $draft.dsql.endpoint, prompt: Text("abc123.dsql.eu-west-1.on.aws"))
-            TextField("Regione", text: $draft.dsql.region, prompt: Text(DSQLEndpoint.region(from: draft.dsql.endpoint) ?? "automatica"))
-            Picker("Profilo AWS", selection: $draft.dsql.awsProfile) {
-                Text("Catena predefinita").tag("")
+            TextField("Endpoint", text: $draft.dsql.endpoint, prompt: Text(verbatim: "abc123.dsql.eu-west-1.on.aws"))
+            TextField("Region", text: $draft.dsql.region, prompt: Text(DSQLEndpoint.region(from: draft.dsql.endpoint) ?? String(localized: "automatic")))
+            Picker("AWS profile", selection: $draft.dsql.awsProfile) {
+                Text("Default chain").tag("")
                 ForEach(profiles, id: \.self) { Text($0).tag($0) }
             }
-            Toggle("Ruolo admin", isOn: $draft.dsqlUsesAdmin)
+            Toggle("Admin role", isOn: $draft.dsqlUsesAdmin)
             if !draft.dsqlUsesAdmin {
-                TextField("Ruolo database", text: $draft.dsql.user, prompt: Text("app_reader"))
+                TextField("Database role", text: $draft.dsql.user, prompt: Text(verbatim: "app_reader"))
             }
-            TextField("Database", text: $draft.dsql.database, prompt: Text("postgres"))
-            Picker("Durata token", selection: $draft.dsql.tokenLifetimeSeconds) {
-                Text("5 minuti").tag(300)
-                Text("15 minuti").tag(900)
-                Text("1 ora").tag(3600)
+            TextField("Database", text: $draft.dsql.database, prompt: Text(verbatim: "postgres"))
+            Picker("Token lifetime", selection: $draft.dsql.tokenLifetimeSeconds) {
+                Text("5 minutes").tag(300)
+                Text("15 minutes").tag(900)
+                Text("1 hour").tag(3600)
             }
         } header: {
-            Text("Aurora DSQL")
+            Text(verbatim: "Aurora DSQL")
         } footer: {
-            Text("La password è un token IAM generato con la AWS CLI e le credenziali locali del profilo. Tabula lo rinnova da sola e ricrea la connessione prima del limite di 60 minuti di DSQL.")
+            Text("The password is an IAM token generated with the AWS CLI and the profile’s local credentials. Tabula renews it automatically and recreates the connection before DSQL’s 60-minute limit.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -124,7 +124,7 @@ struct ConnectionFormView: View {
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: 5))
                 .overlay(alignment: .topLeading) {
                     if draft.script.script.isEmpty {
-                        Text("es. bash ~/scripts/db-tunnel-prod.sh")
+                        Text("e.g. bash ~/scripts/db-tunnel-prod.sh")
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(.tertiary)
                             .padding(.top, 1)
@@ -132,14 +132,14 @@ struct ConnectionFormView: View {
                             .allowsHitTesting(false)
                     }
                 }
-            Toggle("Apre un tunnel: attendi che \(endpointLabel) risponda", isOn: $draft.script.waitsForPort)
-            Stepper("Attesa massima: \(draft.script.timeoutSeconds) s", value: $draft.script.timeoutSeconds, in: 5...300, step: 5)
+            Toggle("Opens a tunnel: wait for \(endpointLabel) to respond", isOn: $draft.script.waitsForPort)
+            Stepper("Max wait: \(draft.script.timeoutSeconds) s", value: $draft.script.timeoutSeconds, in: 5...300, step: 5)
         } header: {
-            Text("Prima della connessione")
+            Text("Before connecting")
         } footer: {
             Text(draft.script.waitsForPort
-                ? "Lo script gira in una shell di login (zsh) e può restare attivo: Tabula lo lancia solo se la porta non risponde già, lo rilancia se il tunnel cade e lo chiude con l'ultima finestra che lo usa."
-                : "Lo script gira in una shell di login (zsh) a ogni connessione e deve terminare con successo prima che Tabula si colleghi.")
+                ? "The script runs in a login shell (zsh) and can keep running: Tabula launches it only if the port isn’t already responding, relaunches it if the tunnel drops, and stops it when the last window using it closes."
+                : "The script runs in a login shell (zsh) on every connection and must finish successfully before Tabula connects.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -147,8 +147,8 @@ struct ConnectionFormView: View {
 
     private var endpointLabel: String {
         switch draft.driver {
-        case .postgres: "\(draft.postgres.host.isEmpty ? "host" : draft.postgres.host):\(draft.portText)"
-        case .dsql: "l'endpoint"
+        case .postgres: "\(draft.postgres.host.isEmpty ? String(localized: "host") : draft.postgres.host):\(draft.portText)"
+        case .dsql: String(localized: "the endpoint")
         }
     }
 
@@ -156,10 +156,10 @@ struct ConnectionFormView: View {
         HStack {
             testStatus
             Spacer()
-            Button("Annulla") { onFinish(nil, false) }.keyboardShortcut(.cancelAction)
-            Button("Prova") { Task { await test() } }
-            Button("Salva") { save(connect: false) }
-            Button("Connetti") { save(connect: true) }.keyboardShortcut(.defaultAction)
+            Button("Cancel") { onFinish(nil, false) }.keyboardShortcut(.cancelAction)
+            Button("Test") { Task { await test() } }
+            Button("Save") { save(connect: false) }
+            Button("Connect") { save(connect: true) }.keyboardShortcut(.defaultAction)
         }
         .padding(20)
     }
@@ -188,7 +188,7 @@ struct ConnectionFormView: View {
         do {
             let result = try await session.execute("SELECT current_user, version()")
             let user = result.rows.first?.first?.displayText ?? "?"
-            testState = .succeeded("Connesso come \(user)")
+            testState = .succeeded(String(localized: "Connected as \(user)"))
         } catch {
             testState = .failed(error.localizedDescription)
         }
@@ -200,7 +200,7 @@ struct ConnectionFormView: View {
         guard draft.validationMessage == nil else { return }
         let connection = draft.makeConnection()
         do {
-            try model.save(connection, password: draft.driver == .postgres ? draft.password : nil)
+            try model.save(connection, password: draft.driver == .postgres ? draft.password : nil, keepingStoredPassword: draft.passwordUnreadable && draft.password.isEmpty)
             onFinish(connection, connect)
         } catch {
             saveError = error.localizedDescription

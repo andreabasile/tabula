@@ -7,9 +7,9 @@ public enum SafeMode: String, Codable, CaseIterable, Sendable {
 
     public var title: String {
         switch self {
-        case .silent: "Silenziosa — invia le query senza avvisi"
-        case .alertAll: "Avviso 1 — chiedi conferma prima di ogni query"
-        case .alertWrites: "Avviso 2 — chiedi conferma tranne SELECT/EXPLAIN/SHOW"
+        case .silent: String(localized: "Silent — send queries without warnings")
+        case .alertAll: String(localized: "Warning 1 — confirm before every query")
+        case .alertWrites: String(localized: "Warning 2 — confirm except SELECT/EXPLAIN/SHOW")
         }
     }
 
@@ -23,25 +23,54 @@ public enum SafeMode: String, Codable, CaseIterable, Sendable {
 }
 
 public enum StatementClassifier {
-    private static let readOnlyKeywords: Set<String> = ["select", "explain", "show", "values", "table"]
+    private static let readKeywords: Set<String> = ["select", "values", "table", "with"]
+    private static let writeVerbs: Set<String> = ["insert", "update", "delete", "merge"]
 
     public static func isReadOnly(_ statement: String) -> Bool {
-        guard let keyword = firstKeyword(of: statement) else { return true }
-        if keyword == "with" { return !containsWriteKeyword(statement) }
-        return readOnlyKeywords.contains(keyword)
+        // Tokens, not text: names like insert_date and words in strings or comments are not keywords.
+        let tokens = SQLTokens.split(statement).filter { $0.kind != .comment }
+        guard let start = tokens.firstIndex(where: { $0.text != "(" }), tokens[start].kind == .word else { return true }
+        switch tokens[start].text.lowercased() {
+        case "show": return true
+        case "explain": return explainIsReadOnly(Array(tokens[(start + 1)...]))
+        default: return isRead(tokens)
+        }
     }
 
-    static func firstKeyword(of statement: String) -> String? {
+    /// SELECT, VALUES, TABLE or WITH with no write verb where a statement starts (a WITH body after
+    /// `(`, its main statement after `)`), and no INTO: SELECT … INTO creates a table.
+    /// FOR UPDATE and columns named update follow other words, so they stay reads.
+    private static func isRead(_ tokens: [SQLTokens.Token]) -> Bool {
+        guard let first = tokens.first(where: { $0.text != "(" }), readKeywords.contains(first.text.lowercased()) else { return false }
+        for (index, token) in tokens.enumerated() where token.kind == .word {
+            let word = token.text.lowercased()
+            if word == "into" { return false }
+            if writeVerbs.contains(word), index > 0, ["(", ")"].contains(tokens[index - 1].text) { return false }
+        }
+        return true
+    }
+
+    /// Plain EXPLAIN only plans; EXPLAIN ANALYZE runs the statement it explains, so that one decides.
+    private static func explainIsReadOnly(_ tokens: [SQLTokens.Token]) -> Bool {
+        var rest = tokens[...]
+        var analyzes = false
+        if rest.first?.text == "(" {
+            guard let close = rest.firstIndex(where: { $0.text == ")" }) else { return false }
+            analyzes = rest[..<close].contains { ["analyze", "analyse"].contains($0.text.lowercased()) }
+            rest = rest[(close + 1)...]
+        } else {
+            while let word = rest.first?.text.lowercased(), ["analyze", "analyse", "verbose"].contains(word) {
+                analyzes = analyzes || word != "verbose"
+                rest = rest.dropFirst()
+            }
+        }
+        return !analyzes || isRead(Array(rest))
+    }
+
+    public static func firstKeyword(of statement: String) -> String? {
         let code = StatementSplitter.strippingComments(statement)
         let trimmed = code.drop { $0.isWhitespace || $0 == "(" }
         let word = trimmed.prefix { $0.isLetter }
         return word.isEmpty ? nil : word.lowercased()
-    }
-
-    private static func containsWriteKeyword(_ statement: String) -> Bool {
-        let words = StatementSplitter.strippingComments(statement)
-            .lowercased()
-            .split { !$0.isLetter }
-        return words.contains { ["insert", "update", "delete", "merge"].contains($0) }
     }
 }

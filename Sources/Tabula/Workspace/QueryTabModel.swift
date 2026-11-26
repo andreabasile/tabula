@@ -2,127 +2,6 @@ import Foundation
 import Observation
 import TabulaCore
 
-/// One statement's result, filled chunk by chunk while the server streams it.
-@MainActor
-@Observable
-final class StatementOutcome: Identifiable {
-    let id = UUID()
-    let statement: String
-    let startedAt = Date()
-    private(set) var columns: [ResultColumn] = []
-    private(set) var rows: [[CellValue]] = []
-    private(set) var commandTag = ""
-    private(set) var duration: TimeInterval?
-    private(set) var error: String?
-    /// Bumped on every chunk so the grid knows to redraw.
-    private(set) var revision = 0
-    /// Set when the rows come from one table with its primary key: cells can then be edited.
-    private(set) var source: ResultSource?
-    private(set) var isCancelled = false
-    private(set) var changes = ChangeSet()
-    var editError: String?
-
-    init(statement: String) {
-        self.statement = statement
-    }
-
-    var isRunning: Bool { duration == nil && error == nil }
-    var returnsRows: Bool { !columns.isEmpty }
-
-    func append(_ chunk: ResultChunk) {
-        guard !isCancelled else { return }
-        if columns.isEmpty { columns = chunk.columns }
-        rows.append(contentsOf: chunk.rows)
-        revision += 1
-    }
-
-    func finish(_ summary: StreamSummary) {
-        if columns.isEmpty { columns = summary.columns }
-        commandTag = summary.commandTag
-        duration = summary.duration
-        revision += 1
-    }
-
-    func fail(_ message: String) {
-        error = message
-        duration = Date().timeIntervalSince(startedAt)
-        revision += 1
-    }
-
-    func cancel() {
-        guard isRunning else { return }
-        isCancelled = true
-        fail("Query annullata")
-    }
-
-    // MARK: Editing
-
-    func setSource(_ source: ResultSource?) {
-        self.source = source
-        revision += 1
-    }
-
-    var isEditable: Bool { source != nil && !isRunning }
-
-    func canEdit(column: Int) -> Bool { source?.isEditable(column: column) == true }
-
-    func value(row: Int, column: Int) -> CellValue {
-        if let source, let name = source.columnNames[column],
-           let edited = changes.updates[source.rowKey(rows[row])]?[name] {
-            return edited
-        }
-        return rows[row][column]
-    }
-
-    func state(row: Int, column: Int) -> CellState {
-        guard let source else { return .normal }
-        let key = source.rowKey(rows[row])
-        if changes.deletes.contains(key) { return .deleted }
-        guard let name = source.columnNames[column] else { return .normal }
-        return changes.updates[key]?[name] != nil ? .edited : .normal
-    }
-
-    func setValue(_ value: CellValue, row: Int, column: Int) {
-        guard let source, let name = source.columnNames[column], value != rows[row][column] else { return }
-        changes.setValue(value, column: name, row: source.rowKey(rows[row]))
-        revision += 1
-    }
-
-    func deleteRows(_ indexes: [Int]) {
-        guard let source else { return }
-        for row in indexes where rows.indices.contains(row) { changes.delete(source.rowKey(rows[row])) }
-        revision += 1
-    }
-
-    func discardChanges() {
-        changes = ChangeSet()
-        editError = nil
-        revision += 1
-    }
-
-    var pendingStatements: [String] {
-        guard let source else { return [] }
-        let order = source.columnNames.sorted { $0.key < $1.key }.map(\.value)
-        return changes.statements(for: source.table, columnOrder: order)
-    }
-
-    /// After a successful commit the grid keeps the edited values instead of re-running the query.
-    func applyCommittedChanges() {
-        guard let source else { return }
-        rows = rows.compactMap { row in
-            let key = source.rowKey(row)
-            if changes.deletes.contains(key) { return nil }
-            guard let updates = changes.updates[key] else { return row }
-            var patched = row
-            for (index, name) in source.columnNames { if let value = updates[name] { patched[index] = value } }
-            return patched
-        }
-        changes = ChangeSet()
-        editError = nil
-        revision += 1
-    }
-}
-
 @MainActor
 @Observable
 final class QueryTabModel {
@@ -147,7 +26,8 @@ final class QueryTabModel {
         let ascending: Bool
     }
 
-    private unowned let workspace: WorkspaceModel
+    /// Weak: a query still running when its window closes must not outlive (or crash on) the workspace.
+    private weak var workspace: WorkspaceModel?
 
     init(title: String, text: String, workspace: WorkspaceModel) {
         self.title = title
@@ -155,7 +35,8 @@ final class QueryTabModel {
         self.workspace = workspace
     }
 
-    var catalog: SchemaCatalog { workspace.catalog }
+    var catalog: SchemaCatalog { workspace?.catalog ?? SchemaCatalog() }
+    var hasUnsavedChanges: Bool { outcomes.contains { !$0.changes.isEmpty } }
 
     var selectedOutcome: StatementOutcome? {
         outcomes.first { $0.id == selectedOutcomeID } ?? outcomes.last
@@ -172,11 +53,12 @@ final class QueryTabModel {
             offset += 1
             if unit == 0x0A { line += 1; lineStart = offset }
         }
-        return "riga \(line), colonna \(location - lineStart + 1), posizione \(location)"
+        return String(localized: "row \(line), column \(location - lineStart + 1), position \(location)")
     }
 
     /// Indexes of the rows matching the result search box, in the header-click order.
     func visibleRows(of outcome: StatementOutcome) -> [Int] {
+        // shortcut: filtered and sorted again on every redraw, cache it per outcome revision, search and sort if large results feel slow.
         let query = resultSearch.trimmingCharacters(in: .whitespaces)
         var rows = Array(outcome.rows.indices)
         if !query.isEmpty {
@@ -213,7 +95,7 @@ final class QueryTabModel {
 
     func cancel() {
         outcomes.last?.cancel()
-        workspace.cancelRunningQuery()
+        workspace?.cancelRunningQuery()
     }
 
     /// ⌘I: formats the selection, or the whole editor when nothing is selected.
@@ -227,6 +109,8 @@ final class QueryTabModel {
 
     private func run(_ statements: [String]) async {
         guard !statements.isEmpty, !isRunning else { return }
+        // Running again replaces the results, and with them any edits not saved with ⌘S.
+        guard !hasUnsavedChanges || UnsavedChanges.confirmDiscard() else { return }
         isRunning = true
         defer { isRunning = false }
         outcomes = []
@@ -240,13 +124,15 @@ final class QueryTabModel {
             guard await stream(QueryLimit.apply(rowLimit, to: statement), into: outcome) else { break }
         }
         selectedOutcomeID = outcomes.last(where: \.returnsRows)?.id ?? outcomes.last?.id
-        if outcomes.contains(where: { isSchemaChange($0.statement) }) { await workspace.loadTables() }
+        if outcomes.contains(where: { isSchemaChange($0.statement) }) { await workspace?.loadTables() }
     }
 
     /// Returns false when the script must stop (error or cancelled confirmation).
     private func stream(_ sql: String, into outcome: StatementOutcome) async -> Bool {
+        guard let workspace else { return false }
         do {
             let summary = try await workspace.stream(sql) { chunk in
+                // shortcut: chunks keep their order only because main-actor tasks run first-in, first-out, switch to an AsyncStream if that ever stops holding.
                 Task { @MainActor in outcome.append(chunk) }
             }
             // Chunks hop to the main actor asynchronously; let them land before finishing.
@@ -268,7 +154,7 @@ final class QueryTabModel {
 
     /// ⌘S on an editable result: the same safe-mode confirmation and transaction as table tabs.
     func commit(_ outcome: StatementOutcome) async {
-        guard !outcome.changes.isEmpty else { return }
+        guard !outcome.changes.isEmpty, let workspace else { return }
         do {
             try await workspace.commit(outcome.pendingStatements)
             outcome.applyCommittedChanges()
@@ -281,7 +167,6 @@ final class QueryTabModel {
     }
 
     private func isSchemaChange(_ statement: String) -> Bool {
-        let keyword = statement.drop { $0.isWhitespace }.prefix { $0.isLetter }.lowercased()
-        return ["create", "drop", "alter"].contains(keyword)
+        ["create", "drop", "alter"].contains(StatementClassifier.firstKeyword(of: statement) ?? "")
     }
 }

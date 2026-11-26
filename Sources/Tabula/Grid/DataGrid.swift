@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 import TabulaCore
 
@@ -13,8 +14,9 @@ struct DataGridSource {
     var value: (Int, Int) -> CellValue
     var state: (Int, Int) -> CellState
     var onEdit: (Int, Int, CellValue) -> Void = { _, _, _ in }
-    /// Column index and direction; query results may repeat a column name.
-    var onSort: ((Int, Bool) -> Void)?
+    /// Column index and direction; query results may repeat a column name. Returns false when the
+    /// sort was refused (unsaved edits kept), so the header arrow goes back.
+    var onSort: ((Int, Bool) -> Bool)?
     var table: TableReference?
     var onDeleteRows: (() -> Void)?
     /// Number shown on the first row: 1, or the page offset + 1 for table pages.
@@ -89,6 +91,7 @@ struct DataGrid: NSViewRepresentable {
             guard !parent.source.columns.isEmpty else { return tableView.reloadData() }
             let numbers = NSTableColumn(identifier: Self.rowNumberIdentifier)
             numbers.title = ""
+            // Sized once, for row numbers up to ~100k past the first: streamed rows keep arriving after this.
             numbers.width = CGFloat(max(String(parent.source.firstRowNumber + 99_999).count, 3)) * 7.5 + 12
             numbers.minWidth = 30
             numbers.resizingMask = []
@@ -148,7 +151,10 @@ struct DataGrid: NSViewRepresentable {
         func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
             guard !isRebuilding else { return }
             guard let descriptor = tableView.sortDescriptors.first, let key = descriptor.key, let column = Int(key) else { return }
-            parent.source.onSort?(column, descriptor.ascending)
+            guard parent.source.onSort?(column, descriptor.ascending) == false else { return }
+            isRebuilding = true
+            tableView.sortDescriptors = oldDescriptors
+            isRebuilding = false
         }
 
         // MARK: Editing
@@ -160,40 +166,49 @@ struct DataGrid: NSViewRepresentable {
             let column = field.tag
             let typed = field.stringValue
             let current = parent.source.value(row, column)
+            let shown = GridCell.editableString(current, typeName: parent.source.columns[column].typeName)
             // NULL/DEFAULT/EMPTY show as placeholders, so an untouched cell reads back as "".
-            guard typed != GridCell.editableString(current, typeName: parent.source.columns[column].typeName) else { return }
-            parent.source.onEdit(row, column, .text(typed))
+            guard typed != shown else { return }
+            // The cell shows newlines as ⏎ (\r\n as \r⏎): put them back, or the edit would write ⏎ into the database.
+            let restored = shown.contains("⏎") ? typed.replacingOccurrences(of: "⏎", with: "\n") : typed
+            parent.source.onEdit(row, column, .text(restored))
         }
 
         func setSelectedCells(to value: CellValue) {
             guard let tableView else { return }
             let column = tableView.clickedColumn >= 0 ? tableView.clickedColumn : tableView.selectedColumn
-            guard column >= 0, let index = Int(tableView.tableColumns[column].identifier.rawValue) else { return }
+            guard let index = resultColumn(at: column) else { return }
             for row in tableView.selectedRowIndexes { parent.source.onEdit(row, index, value) }
+        }
+
+        /// The result column shown at a table-view column position; nil for the row-number column.
+        private func resultColumn(at position: Int) -> Int? {
+            guard let tableView, tableView.tableColumns.indices.contains(position) else { return nil }
+            return Int(tableView.tableColumns[position].identifier.rawValue)
         }
 
         // MARK: Context menu
 
         func makeMenu() -> NSMenu {
             let menu = NSMenu()
-            menu.addItem(item("Copia", #selector(copySelection)))
-            menu.addItem(item("Copia valore cella", #selector(copyCellValue)))
-            menu.addItem(item("Copia valori della colonna", #selector(copyColumnValues)))
-            let copyAs = NSMenuItem(title: "Copia righe come", action: nil, keyEquivalent: "")
+            menu.addItem(item(String(localized: "Copy"), #selector(copySelection)))
+            menu.addItem(item(String(localized: "Copy Cell Value"), #selector(copyCellValue)))
+            menu.addItem(item(String(localized: "Copy Column Values"), #selector(copyColumnValues)))
+            let copyAs = NSMenuItem(title: String(localized: "Copy Rows As"), action: nil, keyEquivalent: "")
             let formats = NSMenu()
             for (index, format) in RowCopyFormat.allCases.enumerated() {
-                let entry = item(format.rawValue, #selector(copyAs(_:)))
+                let entry = item(format.title, #selector(copyAs(_:)))
                 entry.tag = index
                 formats.addItem(entry)
             }
             copyAs.submenu = formats
             menu.addItem(copyAs)
             menu.addItem(.separator())
-            menu.addItem(item("Imposta NULL", #selector(setNull)))
-            menu.addItem(item("Imposta DEFAULT", #selector(setDefault)))
-            menu.addItem(item("Imposta stringa vuota", #selector(setEmpty)))
+            menu.addItem(item(String(localized: "Set to NULL"), #selector(setNull)))
+            menu.addItem(item(String(localized: "Set to DEFAULT"), #selector(setDefault)))
+            menu.addItem(item(String(localized: "Set to Empty String"), #selector(setEmpty)))
             menu.addItem(.separator())
-            menu.addItem(item("Elimina righe", #selector(deleteRows)))
+            menu.addItem(item(String(localized: "Delete Rows"), #selector(deleteRows)))
             return menu
         }
 
@@ -228,15 +243,12 @@ struct DataGrid: NSViewRepresentable {
         }
 
         @objc func copyCellValue() {
-            guard let tableView, let row = targetRows.first else { return }
-            let column = max(tableView.clickedColumn, 0)
-            guard let index = Int(tableView.tableColumns[column].identifier.rawValue) else { return }
+            guard let tableView, let row = targetRows.first, let index = resultColumn(at: max(tableView.clickedColumn, 0)) else { return }
             Pasteboard.copy(parent.source.value(row, index).displayText)
         }
 
         @objc func copyColumnValues() {
-            guard let tableView, tableView.clickedColumn >= 0,
-                  let index = Int(tableView.tableColumns[tableView.clickedColumn].identifier.rawValue) else { return }
+            guard let tableView, let index = resultColumn(at: tableView.clickedColumn) else { return }
             let values = (0..<parent.source.rowCount).map { parent.source.value($0, index).displayText }
             Pasteboard.copy(values.joined(separator: "\n"))
         }
@@ -248,22 +260,19 @@ struct DataGrid: NSViewRepresentable {
         @objc func deleteRows() {
             parent.source.onDeleteRows?()
         }
-
-        func validate(_ item: NSMenuItem) -> Bool {
-            let editingActions: [Selector] = [#selector(setNull), #selector(setDefault), #selector(setEmpty)]
-            if let action = item.action, editingActions.contains(action) {
-                let column = tableView?.clickedColumn ?? -1
-                let index = column >= 0 ? Int(tableView?.tableColumns[column].identifier.rawValue ?? "") : nil
-                return parent.source.isEditable && index.map(parent.source.canEditColumn) != false
-            }
-            if item.action == #selector(deleteRows) { return parent.source.onDeleteRows != nil }
-            return parent.source.rowCount > 0
-        }
     }
 }
 
 extension DataGrid.Coordinator: NSMenuItemValidation {
-    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool { validate(menuItem) }
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        let editingActions: [Selector] = [#selector(setNull), #selector(setDefault), #selector(setEmpty)]
+        if let action = item.action, editingActions.contains(action) {
+            let index = resultColumn(at: tableView?.clickedColumn ?? -1)
+            return parent.source.isEditable && index.map(parent.source.canEditColumn) != false
+        }
+        if item.action == #selector(deleteRows) { return parent.source.onDeleteRows != nil }
+        return parent.source.rowCount > 0
+    }
 }
 
 /// Adds ⌘C and ⌫ on the grid itself, as in TablePlus.
@@ -275,7 +284,7 @@ final class GridTableView: NSTableView {
     }
 
     override func keyDown(with event: NSEvent) {
-        let isDelete = event.keyCode == 51 || event.keyCode == 117
+        let isDelete = [kVK_Delete, kVK_ForwardDelete].contains(Int(event.keyCode))
         if isDelete, !selectedRowIndexes.isEmpty, coordinator?.parent.source.onDeleteRows != nil {
             coordinator?.deleteRows()
             return
@@ -331,7 +340,7 @@ final class GridCell: NSTableCellView {
     func configure(value: CellValue, typeName: String, state: CellState, editable: Bool) {
         guard let field = textField else { return }
         field.stringValue = Self.editableString(value, typeName: typeName)
-        field.alignment = ["int2", "int4", "int8", "numeric", "float4", "float8", "oid", "money"].contains(typeName) ? .right : .left
+        field.alignment = ResultSorting.numericTypes.contains(typeName) ? .right : .left
         field.placeholderAttributedString = Self.placeholder(for: value).map {
             NSAttributedString(string: $0, attributes: [
                 .foregroundColor: NSColor.tertiaryLabelColor,
@@ -370,11 +379,4 @@ final class RowNumberCell: NSTableCellView {
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
-}
-
-enum Pasteboard {
-    static func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-    }
 }

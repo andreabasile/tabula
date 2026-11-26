@@ -35,6 +35,14 @@ struct ConnectionStoreTests {
         #expect(secrets.values[connection.id] == nil)
     }
 
+    @Test func unreadablePasswordIsKeptWhenTheFieldWasLeftEmpty() throws {
+        let (store, secrets) = makeStore()
+        let connection = ConnectionConfig(name: "local", kind: .postgres(PostgresSettings()))
+        try store.save(connection, password: "hunter2")
+        try store.save(connection, password: "", keepingStoredPassword: true)
+        #expect(secrets.values[connection.id] == "hunter2")
+    }
+
     @Test func savingExistingIDReplacesIt() throws {
         let (store, _) = makeStore()
         var connection = ConnectionConfig(name: "a", kind: .postgres(PostgresSettings()))
@@ -62,6 +70,12 @@ struct ConnectionURLTests {
     @Test func parsesPostgresURL() {
         let parsed = ConnectionURL.parse("postgresql://me:p%40ss@db.example.com:6543/app?sslmode=require")
         #expect(parsed == .init(kind: .postgres(PostgresSettings(host: "db.example.com", port: 6543, user: "me", database: "app", sslMode: .required)), password: "p@ss"))
+    }
+
+    @Test func warnsWhenCertificateVerificationIsDropped() {
+        let parsed = ConnectionURL.parse("postgresql://me@db.example.com/app?sslmode=verify-full")
+        #expect(parsed?.kind == .postgres(PostgresSettings(host: "db.example.com", user: "me", database: "app", sslMode: .required)))
+        #expect(parsed?.warning == SSLMode.unverifiedCertificateWarning)
     }
 
     @Test func dsqlHostBecomesDSQLConnection() {

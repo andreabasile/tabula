@@ -27,11 +27,11 @@ public enum PreConnectScriptError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .scriptFailed(let code, let output):
-            "Lo script prima della connessione è terminato con errore (\(code)).\(Self.tail(output))"
+            String(localized: "The pre-connect script exited with an error (\(code)).") + Self.tail(output)
         case .portNeverOpened(let host, let port, let seconds, let output):
-            "Dopo \(seconds) s \(host):\(port) non risponde ancora: il tunnel non si è aperto.\(Self.tail(output))"
+            String(localized: "After \(seconds) s \(host):\(port) still isn’t responding: the tunnel didn’t open.") + Self.tail(output)
         case .scriptTimedOut(let seconds, let output):
-            "Lo script prima della connessione non è terminato entro \(seconds) s.\(Self.tail(output))"
+            String(localized: "The pre-connect script didn’t finish within \(seconds) s.") + Self.tail(output)
         }
     }
 

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 import TabulaCore
 
@@ -177,7 +178,7 @@ final class SQLTextView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard string.isEmpty else { return }
-        let hint = "-- Scrivi la query qui. ⌘↩ esegue lo statement corrente, ⇧⌘↩ tutto.\n-- ⌃Spazio o Esc per i suggerimenti; dopo JOIN propone tabella e condizione ON." as NSString
+        let hint = String(localized: "-- Write your query here. ⌘↩ runs the current statement, ⇧⌘↩ runs everything.\n-- ⌃Space or Esc for suggestions; after JOIN it suggests a table and an ON condition.") as NSString
         hint.draw(
             at: NSPoint(x: textContainerInset.width + 5, y: textContainerInset.height),
             withAttributes: [.font: SQLHighlighter.font, .foregroundColor: NSColor.placeholderTextColor]
@@ -185,7 +186,7 @@ final class SQLTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
-        let isReturn = event.keyCode == 36 || event.keyCode == 76
+        let isReturn = [kVK_Return, kVK_ANSI_KeypadEnter].contains(Int(event.keyCode))
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if handleCompletionKey(event, isReturn: isReturn, flags: flags) { return }
         if isReturn, flags == [.command] {
@@ -200,8 +201,8 @@ final class SQLTextView: NSTextView {
     }
 
     private func handleCompletionKey(_ event: NSEvent, isReturn: Bool, flags: NSEvent.ModifierFlags) -> Bool {
-        let isEscape = event.keyCode == 53
-        let isControlSpace = event.keyCode == 49 && flags == [.control]
+        let isEscape = Int(event.keyCode) == kVK_Escape
+        let isControlSpace = Int(event.keyCode) == kVK_Space && flags == [.control]
         guard popup.isVisible else {
             if isControlSpace || (isEscape && flags.isEmpty) {
                 updateCompletions(automatic: false)
@@ -209,13 +210,13 @@ final class SQLTextView: NSTextView {
             }
             return false
         }
-        switch event.keyCode {
-        case 125: popup.moveSelection(by: 1)
-        case 126: popup.moveSelection(by: -1)
-        case 121: popup.moveSelection(by: 8)
-        case 116: popup.moveSelection(by: -8)
-        case 48: popup.acceptSelection()
-        case 53: popup.hide()
+        switch Int(event.keyCode) {
+        case kVK_DownArrow: popup.moveSelection(by: 1)
+        case kVK_UpArrow: popup.moveSelection(by: -1)
+        case kVK_PageDown: popup.moveSelection(by: 8)
+        case kVK_PageUp: popup.moveSelection(by: -8)
+        case kVK_Tab: popup.acceptSelection()
+        case kVK_Escape: popup.hide()
         default:
             guard isReturn, flags.isEmpty else { return false }
             popup.acceptSelection()

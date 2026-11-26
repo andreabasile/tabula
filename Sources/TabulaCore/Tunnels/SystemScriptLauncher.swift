@@ -24,7 +24,7 @@ public enum ShellProcessError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .spawnFailed(let code): "Impossibile avviare lo script: \(String(cString: strerror(code)))"
+        case .spawnFailed(let code): String(localized: "Couldn’t start the script: \(String(cString: strerror(code)))")
         }
     }
 }
@@ -34,6 +34,8 @@ final class ShellProcess: RunningScript, @unchecked Sendable {
     var onFinish: ((pid_t) -> Void)?
     private let lock = NSLock()
     private var buffer = ""
+    /// Only the tail of the script's output is kept, for error messages.
+    private static let maxBufferedCharacters = 20_000
     private var status: Int32?
     private let reader: FileHandle
 
@@ -66,7 +68,7 @@ final class ShellProcess: RunningScript, @unchecked Sendable {
 
         // Strings first: older compilers otherwise read the literals as C pointers.
         let argumentStrings: [String] = ["/bin/zsh", "-l", "-c", script]
-        let environmentStrings: [String] = Self.environment().map { "\($0.key)=\($0.value)" }
+        let environmentStrings: [String] = ChildProcess.environment.map { "\($0.key)=\($0.value)" }
         let arguments: [UnsafeMutablePointer<CChar>?] = argumentStrings.map { strdup($0) } + [nil]
         let environment: [UnsafeMutablePointer<CChar>?] = environmentStrings.map { strdup($0) } + [nil]
         defer {
@@ -105,31 +107,30 @@ final class ShellProcess: RunningScript, @unchecked Sendable {
 
     var output: String { lock.withLock { buffer } }
 
-    func terminate() {
+    func requestStop() {
         // The negative pid signals the whole group, including grandchildren.
+        kill(-processGroup, SIGTERM)
+    }
+
+    func finishStop(by deadline: ContinuousClock.Instant) {
         let group = processGroup
-        kill(-group, SIGTERM)
-        _ = exitCode
-        onFinish?(group)
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
-            if kill(-group, 0) == 0 { kill(-group, SIGKILL) }
+        // Waits here rather than later: at quit the app exits before any deferred kill would run.
+        while kill(-group, 0) == 0, ContinuousClock.now < deadline {
+            _ = exitCode  // reaps the shell, which would otherwise keep the group alive as a zombie
+            usleep(20_000)
         }
+        if kill(-group, 0) == 0 { kill(-group, SIGKILL) }
+        // Only now: a group still alive must stay on record so the next launch can reap it.
+        onFinish?(group)
     }
 
     private func append(_ chunk: String) {
         lock.withLock {
             buffer += chunk
-            if buffer.count > 20_000 { buffer = String(buffer.suffix(20_000)) }
+            if buffer.count > Self.maxBufferedCharacters { buffer = String(buffer.suffix(Self.maxBufferedCharacters)) }
         }
     }
 
-    private static func environment() -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
-        let extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
-        environment["PATH"] = ([environment["PATH"]].compactMap { $0 } + extraPaths).joined(separator: ":")
-        environment["AWS_PAGER"] = ""
-        return environment
-    }
 }
 
 /// A TCP connect with a short timeout: enough to tell whether a tunnel is listening.

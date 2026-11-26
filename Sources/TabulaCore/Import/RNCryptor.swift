@@ -12,9 +12,9 @@ public enum RNCryptor {
 
         public var errorDescription: String? {
             switch self {
-            case .unknownFormat: "Il file non è un export cifrato di TablePlus."
-            case .wrongPassword: "Password errata."
-            case .decryptionFailed: "Impossibile decifrare il file."
+            case .unknownFormat: String(localized: "The file is not an encrypted TablePlus export.")
+            case .wrongPassword: String(localized: "Wrong password.")
+            case .decryptionFailed: String(localized: "Couldn’t decrypt the file.")
             }
         }
     }

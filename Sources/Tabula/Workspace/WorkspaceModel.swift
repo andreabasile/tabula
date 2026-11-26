@@ -35,6 +35,13 @@ enum WorkspaceTab: @MainActor Identifiable {
         case .query(let model): model.title
         }
     }
+
+    var hasUnsavedChanges: Bool {
+        switch self {
+        case .table(let model): model.hasUnsavedChanges
+        case .query(let model): model.hasUnsavedChanges
+        }
+    }
 }
 
 enum ConnectionPhase: Equatable {
@@ -53,7 +60,8 @@ final class WorkspaceModel: Identifiable {
     private(set) var status = ConnectionStatus()
     private(set) var databases: [String] = []
     /// The database actually in use: libpq falls back to the user name when none is set.
-    private(set) var currentDatabase = ""
+    /// Holds the configured name until the server answers.
+    private(set) var currentDatabase: String
     private(set) var schemas: [String] = []
     var selectedSchema = "public" { didSet { if oldValue != selectedSchema { Task { await loadTables() } } } }
     private(set) var tables: [TableInfo] = []
@@ -62,6 +70,7 @@ final class WorkspaceModel: Identifiable {
     private(set) var tabs: [WorkspaceTab] = []
     var selectedTabID: UUID?
     private(set) var log: [LogEntry] = []
+    private static let maxLogEntries = 500
     var safeMode: SafeMode
     var pendingConfirmation: PendingConfirmation?
     var showsConsole = false
@@ -89,6 +98,7 @@ final class WorkspaceModel: Identifiable {
 
     init(connection: ConnectionConfig, appModel: AppModel) {
         self.connection = connection
+        self.currentDatabase = connection.database
         self.safeMode = connection.safeMode
         self.sessionFactory = appModel.sessionFactory
         self.storedPassword = appModel.savedPassword(for: connection.id)
@@ -110,10 +120,9 @@ final class WorkspaceModel: Identifiable {
 
     var selectedTab: WorkspaceTab? { tabs.first { $0.id == selectedTabID } }
 
-    var isDSQL: Bool {
-        if case .dsql = connection.kind { return true }
-        return false
-    }
+    var isDSQL: Bool { connection.kind.isDSQL }
+
+    var hasUnsavedChanges: Bool { tabs.contains(where: \.hasUnsavedChanges) }
 
     // MARK: Connection
 
@@ -125,15 +134,24 @@ final class WorkspaceModel: Identifiable {
 
     private func observe(_ session: ManagedSession) async {
         await session.onStatusChange { [weak self] status in
-            Task { @MainActor in self?.status = status }
+            Task { @MainActor in self?.update(status) }
         }
+    }
+
+    private func update(_ newStatus: ConnectionStatus) {
+        // A new physical connection starts from a clean session: say so, the user may rely on SET or BEGIN.
+        if newStatus.reconnectCount > status.reconnectCount {
+            append(LogEntry(date: Date(), sql: "", outcome: .failure(String(localized: "Connection reopened: session settings (SET), temporary tables and open transactions were reset."))))
+        }
+        status = newStatus
     }
 
     /// Reopens the session on another database of the same server, closing open tabs.
     func switchDatabase(to database: String) async {
-        guard database != currentDatabase else { return }
+        guard database != currentDatabase, !hasUnsavedChanges || UnsavedChanges.confirmDiscard() else { return }
         await session.close()
         connection = connection.switchingDatabase(to: database)
+        currentDatabase = database
         session = Self.makeSession(connection, factory: sessionFactory, owner: tunnelOwner, passwordBox: passwordBox, storedPassword: storedPassword)
         tabs = []
         selectedTabID = nil
@@ -173,6 +191,7 @@ final class WorkspaceModel: Identifiable {
     }
 
     func close() async {
+        pendingConfirmation?.resume(false)
         await session.close()
         await sessionFactory.tunnels.release(owner: tunnelOwner)
     }
@@ -181,7 +200,7 @@ final class WorkspaceModel: Identifiable {
 
     func disconnect() async {
         await session.close()
-        phase = .failed("Disconnessa. Premi Riprova per riconnetterti.")
+        phase = .failed(String(localized: "Disconnected. Press Retry to reconnect."))
     }
 
     // MARK: Queries
@@ -262,16 +281,18 @@ final class WorkspaceModel: Identifiable {
 
     private func summary(of result: QueryResult) -> String {
         let time = String(format: "%.0f ms", result.duration * 1000)
-        return result.returnsRows && !result.rows.isEmpty ? "\(result.rows.count) righe · \(time)" : "\(result.commandTag) · \(time)"
+        return result.returnsRows && !result.rows.isEmpty ? String(localized: "\(result.rows.count) rows · \(time)") : "\(result.commandTag) · \(time)"
     }
 
     private func append(_ entry: LogEntry) {
         log.append(entry)
-        if log.count > 500 { log.removeFirst(log.count - 500) }
+        if log.count > Self.maxLogEntries { log.removeFirst(log.count - Self.maxLogEntries) }
     }
 
     private func confirmIfNeeded(_ statements: [String]) async -> Bool {
         guard safeMode.requiresConfirmation(for: statements) else { return true }
+        // One prompt at a time: a newer request cancels the one still waiting, which would otherwise hang.
+        pendingConfirmation?.resume(false)
         return await withCheckedContinuation { continuation in
             pendingConfirmation = PendingConfirmation(statements: statements) { [weak self] approved in
                 self?.pendingConfirmation = nil
@@ -307,13 +328,10 @@ final class WorkspaceModel: Identifiable {
     private func openTableFromLaunchArguments() {
         let arguments = CommandLine.arguments
         guard tabs.isEmpty else { return }
-        guard let flag = arguments.firstIndex(of: "--table"), arguments.indices.contains(flag + 1),
-              let table = tables.first(where: { $0.name == arguments[flag + 1] })
-        else {
-            openQueryFromLaunchArguments(arguments)
-            return
+        if let flag = arguments.firstIndex(of: "--table"), arguments.indices.contains(flag + 1),
+           let table = tables.first(where: { $0.name == arguments[flag + 1] }) {
+            openTable(table)
         }
-        openTable(table)
         openQueryFromLaunchArguments(arguments)
     }
 
@@ -328,7 +346,8 @@ final class WorkspaceModel: Identifiable {
     func loadTables() async {
         editableTables = [:]
         let schema = selectedSchema
-        guard let result = try? await runInternal(Introspection.tables(schema: schema)) else { return }
+        // A quick schema switch can deliver an older schema's answer last: drop it.
+        guard let result = try? await runInternal(Introspection.tables(schema: schema)), schema == selectedSchema else { return }
         tables = Introspection.parseTables(result, schema: schema)
         await loadCatalog(schema: schema)
     }
@@ -337,6 +356,7 @@ final class WorkspaceModel: Identifiable {
         guard let columns = try? await runInternal(Introspection.allColumns(schema: schema)) else { return }
         // Aurora DSQL has no foreign keys; the catalog then falls back to inferred joins.
         let keys = try? await runInternal(Introspection.foreignKeys(schema: schema))
+        guard schema == selectedSchema else { return }
         catalog = Introspection.parseCatalog(columns: columns, foreignKeys: keys)
     }
 
@@ -361,13 +381,15 @@ final class WorkspaceModel: Identifiable {
 
     func newQueryTab(sql: String = "") {
         queryCounter += 1
-        let model = QueryTabModel(title: "Query \(queryCounter)", text: sql, workspace: self)
+        let model = QueryTabModel(title: String(localized: "Query \(queryCounter)"), text: sql, workspace: self)
         tabs.append(.query(model))
         selectedTabID = model.id
     }
 
     func closeTab(_ id: UUID) {
-        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = tabs.firstIndex(where: { $0.id == id }),
+              !tabs[index].hasUnsavedChanges || UnsavedChanges.confirmDiscard()
+        else { return }
         tabs.remove(at: index)
         if selectedTabID == id {
             selectedTabID = tabs.indices.contains(index) ? tabs[index].id : tabs.last?.id

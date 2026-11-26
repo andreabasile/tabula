@@ -3,7 +3,7 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'  # Trigger su tag come v1.0.0, v1.2.3, etc.
+      - 'v*'  # Runs on tags like v1.0.0, v1.2.3, etc.
 
 permissions:
   contents: write
@@ -13,14 +13,15 @@ env:
 
 jobs:
   build:
-    runs-on: macos-latest
+    # Homebrew bottles target the runner's macOS and get bundled: keep it at LSMinimumSystemVersion.
+    runs-on: macos-15
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: latest-stable
 
@@ -64,23 +65,23 @@ jobs:
           echo "SHA256: ${SHA256}"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: ${{ env.APP_NAME }}-${{ steps.get_version.outputs.VERSION }}.dmg
           body: |
             ## Tabula v${{ steps.get_version.outputs.VERSION }}
 
-            ### Installazione
+            ### Installation
 
-            **Con Homebrew (consigliato):**
+            **With Homebrew (recommended):**
             ```bash
             brew install --cask andreabasile/tap/tabula
             ```
 
-            **A mano:**
-            1. Scarica il DMG qui sotto
-            2. Aprilo e trascina Tabula in Applicazioni
-            3. Al primo avvio: tasto destro › Apri (l'app non è notarizzata)
+            **Manually:**
+            1. Download the DMG below
+            2. Open it and drag Tabula into Applications
+            3. On first launch: right-click › Open (the app is not notarized)
 
             ### SHA256
             ```
@@ -92,7 +93,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update Homebrew Tap
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           repository: andreabasile/homebrew-tap

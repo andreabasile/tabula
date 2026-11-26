@@ -1,12 +1,18 @@
 import Foundation
 
-public enum RowCopyFormat: String, CaseIterable, Sendable {
-    case plainText = "Testo semplice"
-    case json = "JSON"
-    case markdown = "Tabella Markdown"
-    case csv = "CSV"
-    case csvWithHeader = "CSV con intestazioni"
-    case sqlInsert = "INSERT SQL"
+public enum RowCopyFormat: CaseIterable, Sendable {
+    case plainText, json, markdown, csv, csvWithHeader, sqlInsert
+
+    public var title: String {
+        switch self {
+        case .plainText: String(localized: "Plain Text")
+        case .json: "JSON"
+        case .markdown: String(localized: "Markdown Table")
+        case .csv: "CSV"
+        case .csvWithHeader: String(localized: "CSV with headers")
+        case .sqlInsert: String(localized: "INSERT SQL")
+        }
+    }
 }
 
 /// The "Copy Rows As" menu of the result grid.

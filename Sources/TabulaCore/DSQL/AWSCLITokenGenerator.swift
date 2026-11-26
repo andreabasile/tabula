@@ -24,11 +24,11 @@ public enum TokenGenerationError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .awsCLINotFound:
-            "AWS CLI non trovata. Installala (brew install awscli) o indica il percorso nelle impostazioni."
+            String(localized: "AWS CLI not found. Install it with `brew install awscli`: Tabula looks for `aws` in \(AWSCLITokenGenerator.candidatePaths.joined(separator: ", ")).")
         case .commandFailed(let stderr):
             Self.explain(stderr)
         case .emptyToken:
-            "La AWS CLI non ha restituito alcun token."
+            String(localized: "The AWS CLI returned no token.")
         }
     }
 
@@ -36,12 +36,12 @@ public enum TokenGenerationError: Error, Equatable, LocalizedError {
         let message = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
         let lowered = message.lowercased()
         if lowered.contains("sso") && (lowered.contains("expired") || lowered.contains("token")) {
-            return "Sessione AWS SSO scaduta: esegui `aws sso login` per il profilo.\n\(message)"
+            return String(localized: "AWS SSO session expired: run `aws sso login` for the profile.") + "\n" + message
         }
         if lowered.contains("unable to locate credentials") {
-            return "Nessuna credenziale AWS trovata per questo profilo.\n\(message)"
+            return String(localized: "No AWS credentials found for this profile.") + "\n" + message
         }
-        return message.isEmpty ? "La AWS CLI è terminata con errore." : message
+        return message.isEmpty ? String(localized: "The AWS CLI exited with an error.") : message
     }
 }
 
@@ -52,6 +52,8 @@ public struct AWSCLITokenGenerator: AuthTokenGenerating {
         "/opt/homebrew/bin/aws",
         "/usr/local/bin/aws",
         "/usr/bin/aws",
+        "/opt/local/bin/aws",  // MacPorts
+        NSHomeDirectory() + "/.local/bin/aws",  // pipx, pip --user
     ]
 
     private let runner: CommandRunning

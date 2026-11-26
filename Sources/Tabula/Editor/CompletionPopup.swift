@@ -5,6 +5,7 @@ import TabulaCore
 /// entirely by the editor's key handling so focus never leaves the text view.
 @MainActor
 final class CompletionPopup: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    private static let width: CGFloat = 460
     private let panel: NSPanel
     private let tableView = NSTableView()
     private(set) var items: [CompletionItem] = []
@@ -13,7 +14,7 @@ final class CompletionPopup: NSObject, NSTableViewDataSource, NSTableViewDelegat
     var isVisible: Bool { panel.isVisible }
 
     override init() {
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 460, height: 200), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 200), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         super.init()
         panel.isFloatingPanel = true
         // The editor hides the list itself when its window loses focus; an auto-hidden panel
@@ -24,7 +25,7 @@ final class CompletionPopup: NSObject, NSTableViewDataSource, NSTableViewDelegat
         panel.isOpaque = false
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("item"))
-        column.width = 456
+        column.width = Self.width - 4
         tableView.addTableColumn(column)
         tableView.headerView = nil
         tableView.rowHeight = 22
@@ -67,7 +68,7 @@ final class CompletionPopup: NSObject, NSTableViewDataSource, NSTableViewDelegat
         tableView.selectRowIndexes([0], byExtendingSelection: false)
         tableView.scrollRowToVisible(0)
         let height = CGFloat(min(self.items.count, 9)) * tableView.rowHeight + 6
-        panel.setFrame(NSRect(x: screenPoint.x, y: screenPoint.y - height - 2, width: 460, height: height), display: true)
+        panel.setFrame(NSRect(x: screenPoint.x, y: screenPoint.y - height - 2, width: Self.width, height: height), display: true)
         if panel.parent == nil { parent.addChildWindow(panel, ordered: .above) }
         panel.orderFront(nil)
     }

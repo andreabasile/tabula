@@ -9,7 +9,8 @@ final class AppModel {
     /// Open connections, in the order of TablePlus's left rail.
     private(set) var workspaces: [WorkspaceModel] = []
     var activeWorkspaceID: UUID?
-    var loadError: String?
+    /// Set when connections.json cannot be read; shown on the welcome window.
+    private(set) var loadError: String?
 
     let store: ConnectionStore
     let sessionFactory: SessionFactory
@@ -34,6 +35,7 @@ final class AppModel {
     func reload() {
         do {
             connections = try store.load().sorted { ($0.group, $0.name.lowercased()) < ($1.group, $1.name.lowercased()) }
+            loadError = nil
         } catch {
             loadError = error.localizedDescription
         }
@@ -43,8 +45,8 @@ final class AppModel {
         connections.first { $0.id == id }
     }
 
-    func save(_ connection: ConnectionConfig, password: String?) throws {
-        try store.save(connection, password: password)
+    func save(_ connection: ConnectionConfig, password: String?, keepingStoredPassword: Bool = false) throws {
+        try store.save(connection, password: password, keepingStoredPassword: keepingStoredPassword)
         reload()
     }
 
@@ -56,7 +58,7 @@ final class AppModel {
     func duplicate(_ connection: ConnectionConfig) throws {
         var copy = connection
         copy.id = UUID()
-        copy.name += " copia"
+        copy.name = String(localized: "\(copy.name) copy")
         try save(copy, password: try store.password(for: connection.id))
     }
 
@@ -72,12 +74,17 @@ final class AppModel {
         guard let path = environment["TABULA_IMPORT_FILE"] else { return }
         do {
             let result = try TablePlusImporter.read(Data(contentsOf: URL(fileURLWithPath: path)), password: environment["TABULA_IMPORT_PASSWORD"] ?? "")
-            let fresh = result.connections.filter { item in !connections.contains { $0.pointsToSameServer(as: item.connection) } }
+            let fresh = result.connections.filter { !isAlreadySaved($0.connection) }
             try importConnections(fresh)
-            print("tabula: importate \(fresh.count) connessioni, \(result.connections.count - fresh.count) già presenti, \(result.skipped.count) saltate")
+            print("tabula: imported \(fresh.count) connections, \(result.connections.count - fresh.count) already present, \(result.skipped.count) skipped")
         } catch {
-            print("tabula: import fallito: \(error.localizedDescription)")
+            print("tabula: import failed: \(error.localizedDescription)")
         }
+    }
+
+    /// Same server, port, user and database as a saved connection: imports skip these.
+    func isAlreadySaved(_ connection: ConnectionConfig) -> Bool {
+        connections.contains { $0.pointsToSameServer(as: connection) }
     }
 
     var activeWorkspace: WorkspaceModel? {

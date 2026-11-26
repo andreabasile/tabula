@@ -13,15 +13,15 @@ struct SidebarView: View {
         VStack(spacing: 0) {
             searchField
             List(selection: $selection) {
-                section("Tabelle", kinds: [.table], isExpanded: $showsTables)
-                section("Viste", kinds: [.view, .materializedView], isExpanded: $showsViews)
+                section(String(localized: "Tables"), kinds: [.table], isExpanded: $showsTables)
+                section(String(localized: "Views"), kinds: [.view, .materializedView], isExpanded: $showsViews)
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
             .environment(\.defaultMinListRowHeight, 20)
             .overlay {
                 if model.phase == .connected, model.tables.isEmpty {
-                    Text("Nessuna tabella in \(model.selectedSchema)").font(.callout).foregroundStyle(.secondary)
+                    Text("No tables in \(model.selectedSchema)").font(.callout).foregroundStyle(.secondary)
                 }
             }
             .onChange(of: selection) { _, reference in
@@ -41,7 +41,7 @@ struct SidebarView: View {
     private var searchField: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass").foregroundStyle(.tertiary)
-            TextField("Cerca un elemento…", text: $search)
+            TextField("Search for an item…", text: $search)
                 .textFieldStyle(.plain)
                 .focused($isSearchFocused)
                 .onChange(of: model.tableSearchFocusRequest) { isSearchFocused = true }
@@ -63,10 +63,10 @@ struct SidebarView: View {
         HStack(spacing: 6) {
             Button { model.newQueryTab() } label: { Image(systemName: "plus") }
                 .buttonStyle(.borderless)
-                .help("Nuova query (⌘T)")
-            Picker("", selection: $model.selectedSchema) {
+                .help("New query (⌘T)")
+            Picker(selection: $model.selectedSchema) {
                 ForEach(model.schemas, id: \.self) { Text($0).tag($0) }
-            }
+            } label: {}
             .labelsHidden()
             .controlSize(.small)
             .disabled(model.schemas.count < 2)
@@ -97,7 +97,7 @@ struct SidebarView: View {
                     .contextMenu { contextMenu(for: table) }
                 }
             } header: {
-                Text("\(title) (\(items.count))")
+                Text(verbatim: "\(title) (\(items.count))")
             }
         }
     }
@@ -108,9 +108,9 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func contextMenu(for table: TableInfo) -> some View {
-        Button("Apri in una nuova tab") { model.openTable(table, inNewTab: true) }
-        Button("Copia nome") { Pasteboard.copy(table.name) }
-        Button("Nuova query SELECT") {
+        Button("Open in New Tab") { model.openTable(table, inNewTab: true) }
+        Button("Copy Name") { Pasteboard.copy(table.name) }
+        Button("New SELECT Query") {
             model.newQueryTab(sql: "SELECT * FROM \(table.reference.qualifiedName) LIMIT 100;")
         }
     }
@@ -124,7 +124,7 @@ struct SidebarView: View {
     }
 }
 
-/// Flat, equal-width tabs filling the bar, like TablePlus's TBTabView.
+/// Flat, equal-width tabs filling the bar.
 struct TabBar: View {
     @Bindable var model: WorkspaceModel
 
@@ -142,7 +142,7 @@ struct TabBar: View {
                 Image(systemName: "plus").font(.system(size: 11, weight: .semibold)).frame(width: 30, height: 28)
             }
             .buttonStyle(.borderless)
-            .help("Nuova query (⌘T)")
+            .help("New query (⌘T)")
         }
         .frame(height: 28)
         .background(Theme.surface)
@@ -165,7 +165,7 @@ private struct TabButton: View {
                     .foregroundStyle(.secondary)
                 Text(tab.title).font(.system(size: 12, weight: isSelected ? .medium : .regular)).lineLimit(1)
                     .foregroundStyle(isSelected ? .primary : .secondary)
-                if hasPendingChanges { Circle().fill(.orange).frame(width: 6, height: 6) }
+                if tab.hasUnsavedChanges { Circle().fill(.orange).frame(width: 6, height: 6) }
             }
             .padding(.horizontal, 26)
             HStack {
@@ -188,11 +188,6 @@ private struct TabButton: View {
 
     private var isQuery: Bool {
         if case .query = tab { return true }
-        return false
-    }
-
-    private var hasPendingChanges: Bool {
-        if case .table(let model) = tab { return !model.changes.isEmpty }
         return false
     }
 }

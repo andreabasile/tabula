@@ -1,8 +1,9 @@
 // swift-tools-version: 6.0
+import Foundation
 import PackageDescription
 
-// libpq is keg-only in Homebrew, so its paths are passed explicitly.
-let libpqPrefix = "/opt/homebrew/opt/libpq"
+// libpq is keg-only in Homebrew, so its paths are passed explicitly; LIBPQ_PREFIX points elsewhere.
+let libpqPrefix = ProcessInfo.processInfo.environment["LIBPQ_PREFIX"] ?? "/opt/homebrew/opt/libpq"
 
 let package = Package(
     name: "Tabula",

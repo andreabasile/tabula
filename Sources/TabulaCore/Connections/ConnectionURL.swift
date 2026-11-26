@@ -6,6 +6,7 @@ public enum ConnectionURL {
     public struct Parsed: Equatable, Sendable {
         public let kind: ConnectionKind
         public let password: String?
+        public var warning: String?
     }
 
     public static func parse(_ text: String) -> Parsed? {
@@ -16,11 +17,13 @@ public enum ConnectionURL {
         let user = components.user?.removingPercentEncoding ?? ""
         let database = String(components.path.drop { $0 == "/" })
         if DSQLEndpoint.isDSQLHost(host) {
-            return Parsed(kind: .dsql(DSQLSettings(endpoint: host, user: user.isEmpty ? DSQLSettings.adminRole : user, database: database.isEmpty ? "postgres" : database)), password: nil)
+            return Parsed(kind: .dsql(DSQLSettings(endpoint: host, userOrDefault: user, databaseOrDefault: database)), password: nil)
         }
-        let sslMode = components.queryItems?.first { $0.name == "sslmode" }?.value.flatMap(sslMode(from:)) ?? .preferred
+        let requestedSSL = components.queryItems?.first { $0.name == "sslmode" }?.value?.lowercased()
+        let sslMode = requestedSSL.flatMap(sslMode(from:)) ?? .preferred
         let settings = PostgresSettings(host: host, port: components.port ?? 5432, user: user, database: database, sslMode: sslMode)
-        return Parsed(kind: .postgres(settings), password: components.password?.removingPercentEncoding)
+        let downgraded = ["verify-ca", "verify-full"].contains(requestedSSL)
+        return Parsed(kind: .postgres(settings), password: components.password?.removingPercentEncoding, warning: downgraded ? SSLMode.unverifiedCertificateWarning : nil)
     }
 
     public static func format(_ connection: ConnectionConfig) -> String {
@@ -32,7 +35,7 @@ public enum ConnectionURL {
         switch connection.kind {
         case .postgres(let settings):
             components.port = settings.port
-            components.queryItems = [URLQueryItem(name: "sslmode", value: libpqName(settings.sslMode))]
+            components.queryItems = [URLQueryItem(name: "sslmode", value: settings.sslMode.libpqName)]
         case .dsql:
             components.port = DSQLCredentialsProvider.port
             components.queryItems = [URLQueryItem(name: "sslmode", value: "verify-full")]
@@ -41,19 +44,11 @@ public enum ConnectionURL {
     }
 
     private static func sslMode(from value: String) -> SSLMode? {
-        switch value.lowercased() {
+        switch value {
         case "disable": .disabled
         case "allow", "prefer": .preferred
         case "require", "verify-ca", "verify-full": .required
         default: nil
-        }
-    }
-
-    private static func libpqName(_ mode: SSLMode) -> String {
-        switch mode {
-        case .disabled: "disable"
-        case .preferred: "prefer"
-        case .required: "require"
         }
     }
 }
