@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: macos-latest  # Apple Silicon (arm64)
+    runs-on: macos-15  # same runner as the release, so the bundled dylibs match LSMinimumSystemVersion
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -28,3 +28,7 @@ jobs:
 
       - name: Test
         run: swift test
+
+      # Same bundling as the release (ad-hoc signature); CI=true makes the minos check fatal.
+      - name: Build app bundle
+        run: TABULA_SIGN_IDENTITY=- ./scripts/build-app.sh
