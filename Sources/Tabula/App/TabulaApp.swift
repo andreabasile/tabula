@@ -45,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
         WindowSnapshotter.startIfRequested()
         terminateGracefullyOnSIGTERM()
+        UpdateCheck.start()
     }
 
     private var signalSource: DispatchSourceSignal?

@@ -1535,6 +1535,9 @@
         }
       }
     },
+    "Copy Update Command" : {
+
+    },
     "Copy as URL" : {
       "localizations" : {
         "de" : {
@@ -2750,6 +2753,9 @@
           }
         }
       }
+    },
+    "Later" : {
+
     },
     "Limit" : {
       "localizations" : {
@@ -3967,6 +3973,9 @@
         }
       }
     },
+    "Release Notes" : {
+
+    },
     "Reload" : {
       "localizations" : {
         "de" : {
@@ -4715,6 +4724,9 @@
         }
       }
     },
+    "Tabula %@ is available" : {
+
+    },
     "Tag" : {
       "localizations" : {
         "de" : {
@@ -5358,6 +5370,9 @@
           }
         }
       }
+    },
+    "You have version %@. You can update it with Homebrew:\nbrew upgrade --cask tabula" : {
+
     },
     "Your edits have not been saved with ⌘S and will be lost." : {
       "localizations" : {
