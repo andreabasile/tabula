@@ -18,6 +18,7 @@ final class StatementOutcome: Identifiable {
     private(set) var revision = 0
     /// Set when the rows come from one table with its primary key: cells can then be edited.
     private(set) var source: ResultSource?
+    private(set) var isCancelled = false
     private(set) var changes = ChangeSet()
     var editError: String?
 
@@ -29,6 +30,7 @@ final class StatementOutcome: Identifiable {
     var returnsRows: Bool { !columns.isEmpty }
 
     func append(_ chunk: ResultChunk) {
+        guard !isCancelled else { return }
         if columns.isEmpty { columns = chunk.columns }
         rows.append(contentsOf: chunk.rows)
         revision += 1
@@ -45,6 +47,12 @@ final class StatementOutcome: Identifiable {
         error = message
         duration = Date().timeIntervalSince(startedAt)
         revision += 1
+    }
+
+    func cancel() {
+        guard isRunning else { return }
+        isCancelled = true
+        fail("Query annullata")
     }
 
     // MARK: Editing
@@ -204,6 +212,7 @@ final class QueryTabModel {
     }
 
     func cancel() {
+        outcomes.last?.cancel()
         workspace.cancelRunningQuery()
     }
 
@@ -242,6 +251,7 @@ final class QueryTabModel {
             }
             // Chunks hop to the main actor asynchronously; let them land before finishing.
             await Task.yield()
+            guard !outcome.isCancelled else { return false }
             outcome.finish(summary)
             if outcome.returnsRows {
                 Task { outcome.setSource(await workspace.resultSource(for: outcome.columns)) }
@@ -251,7 +261,7 @@ final class QueryTabModel {
             outcomes.removeAll { $0.id == outcome.id }
             return false
         } catch {
-            outcome.fail(error.localizedDescription)
+            if !outcome.isCancelled { outcome.fail(error.localizedDescription) }
             return false
         }
     }
