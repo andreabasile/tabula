@@ -65,6 +65,36 @@ building (Intel Homebrew: `LIBPQ_PREFIX=/usr/local/opt/libpq`). On a macOS newer
 bundled dylibs need that newer macOS (the result may not run on older Macs); in CI the same check
 fails the build.
 
+## Release signing
+
+Releases are signed with a self-signed certificate, "Tabula Release Signing". Gatekeeper does not
+trust it and the app is not notarized: its only job is to keep the app's designated requirement
+(`identifier "it.basileandrea.tabula" and certificate leaf = H"…"`) the same across releases.
+macOS lists the app by that requirement in the Keychain access of each saved password, so with a
+stable certificate it does not ask again after an update. With an ad-hoc signature the
+requirement is the build's cdhash, which changes every time.
+
+The maintainer creates it once, on their own Mac, with `gh` logged in:
+
+```bash
+./scripts/make-signing-cert.sh
+```
+
+It imports the identity into the login keychain and uploads it to two GitHub Actions secrets,
+`TABULA_SIGNING_CERT_P12` (the base64 .p12) and `TABULA_SIGNING_CERT_PASSWORD`. The release
+workflow signs with it, and fails if the result is still ad-hoc; without the secrets (forks) it
+signs ad-hoc. `./scripts/build-app.sh` uses it too when it is in the Keychain, so local builds
+have the same identity as releases (if macOS asks to let codesign use the key, choose Always Allow).
+
+- **Back it up**: in Keychain Access › login › My Certificates, select "Tabula Release Signing",
+  File › Export Items… as a .p12 with a password, and keep both in a password manager. To restore
+  the secrets: `base64 -i <file>.p12 | gh secret set TABULA_SIGNING_CERT_P12 -R andreabasile/tabula`,
+  then `gh secret set TABULA_SIGNING_CERT_PASSWORD -R andreabasile/tabula`.
+- **Losing or rotating it** (`make-signing-cert.sh --force`) changes the app's identity: after the
+  next release every user is asked once more for Keychain access to each saved password.
+- **Keep it private**: whoever has the key can sign an app that macOS lets read Tabula's saved
+  passwords without asking. If it leaks, rotate it.
+
 ## Known limitations
 
 - **One connection per window.** All tabs and the sidebar share one database connection: a long
@@ -75,9 +105,10 @@ fails the build.
 - **No certificate verification for PostgreSQL.** The SSL modes are disable, prefer and require;
   `verify-ca`/`verify-full` from URLs or TablePlus become `require`, with a warning.
   Aurora DSQL is always verified (`verify-full`).
-- **Unsigned releases.** Releases are ad-hoc signed and not notarized: macOS may ask again for
-  Keychain access after every update, and the app runs on Apple Silicon only. libpq, OpenSSL
-  and Kerberos are bundled, so their security fixes need a new Tabula release.
+- **Not notarized.** Releases are self-signed (see "Release signing") and not notarized, and the
+  app runs on Apple Silicon only. The first update from an ad-hoc signed release (up to the
+  switch) asks once more for Keychain access to each saved password. libpq, OpenSSL and Kerberos
+  are bundled, so their security fixes need a new Tabula release.
 - **Pre-connect scripts are stored in plain text** in `connections.json` and `tunnels.json`:
   do not put secrets in them.
 - **Table pages are not stably ordered.** Pages use `LIMIT`/`OFFSET` without `ORDER BY` unless

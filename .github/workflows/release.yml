@@ -40,9 +40,45 @@ jobs:
           plutil -replace CFBundleShortVersionString -string "${{ steps.get_version.outputs.VERSION }}" Resources/Info.plist
           plutil -replace CFBundleVersion -string "$(git rev-list --count HEAD)" Resources/Info.plist
 
-      # Bundles libpq and its dylibs; without a certificate in the runner the signature is ad-hoc.
+      # The stable release certificate (CONTRIBUTING.md, "Release signing") keeps the designated
+      # requirement the same across releases; forks without the secrets build ad-hoc signed.
+      # Hosted runners are discarded after the job, so the keychain is not deleted.
+      - name: Import signing certificate
+        id: signing
+        env:
+          CERT_P12: ${{ secrets.TABULA_SIGNING_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.TABULA_SIGNING_CERT_PASSWORD }}
+        run: |
+          if [[ -z "$CERT_P12" || -z "$CERT_PASSWORD" ]]; then
+            echo "no signing certificate in the secrets: the app will be signed ad-hoc"
+            echo "identity=-" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          base64 --decode <<< "$CERT_P12" > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -f pkcs12 -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user | xargs security list-keychains -d user -s "$KEYCHAIN"
+          echo "identity=Tabula Release Signing" >> "$GITHUB_OUTPUT"
+
+      # Bundles libpq and its dylibs. With the certificate, an ad-hoc signature (designated
+      # requirement = cdhash) would bring back the Keychain prompts after every update: fail instead.
       - name: Build app bundle
-        run: TABULA_SIGN_IDENTITY=- ./scripts/build-app.sh
+        env:
+          TABULA_SIGN_IDENTITY: ${{ steps.signing.outputs.identity }}
+        run: |
+          ./scripts/build-app.sh
+          DR=$(codesign -d -r- "build/${{ env.APP_NAME }}.app" 2>&1 | grep 'designated =>')
+          echo "$DR"
+          if [[ "$TABULA_SIGN_IDENTITY" != "-" && "$DR" != *certificate* ]]; then
+            echo "error: the app is not signed with the release certificate" >&2
+            exit 1
+          fi
 
       - name: Create DMG
         run: |

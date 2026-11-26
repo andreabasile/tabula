@@ -13,7 +13,7 @@ connection before DSQL's 60-minute limit or when the server closes it.
 brew install --cask andreabasile/tap/tabula
 ```
 
-Apple Silicon only, macOS 15+. The app is ad-hoc signed and not notarized: the cask removes the
+Apple Silicon only, macOS 15+. The app is self-signed and not notarized: the cask removes the
 quarantine attribute after installation, otherwise Gatekeeper would block it from opening.
 libpq is bundled in the app. Aurora DSQL connections need the AWS CLI v2 (for example
 `/opt/homebrew/bin/aws` or `/usr/local/bin/aws`).
